@@ -57,6 +57,8 @@ export const sopCompletionStatusEnum = pgEnum('sop_completion_status', [
   'completed',
 ])
 
+export const utilityTypeEnum = pgEnum('utility_type', ['water', 'electricity'])
+
 // ---------------------------------------------------------------------------
 // Organizations
 // ---------------------------------------------------------------------------
@@ -773,6 +775,78 @@ export const allowedEmailsRelations = relations(allowedEmails, ({ one }) => ({
 }))
 
 // ---------------------------------------------------------------------------
+// Utility Rate Tiers (tiered pricing for water/electricity)
+// ---------------------------------------------------------------------------
+export const utilityRateTiers = pgTable(
+  'utility_rate_tiers',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    propertyId: uuid('property_id')
+      .notNull()
+      .references(() => properties.id, { onDelete: 'cascade' }),
+    utilityType: utilityTypeEnum('utility_type').notNull(),
+    tierNumber: integer('tier_number').notNull(),
+    minUnits: numeric('min_units', { precision: 10, scale: 2 }).notNull(),
+    maxUnits: numeric('max_units', { precision: 10, scale: 2 }),
+    ratePerUnit: numeric('rate_per_unit', { precision: 10, scale: 2 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('utility_rate_tiers_property_type_tier_unique').on(
+      table.propertyId,
+      table.utilityType,
+      table.tierNumber
+    ),
+  ]
+)
+
+export const utilityRateTiersRelations = relations(utilityRateTiers, ({ one }) => ({
+  property: one(properties, {
+    fields: [utilityRateTiers.propertyId],
+    references: [properties.id],
+  }),
+}))
+
+// ---------------------------------------------------------------------------
+// Utility Meter Readings (daily cumulative readings)
+// ---------------------------------------------------------------------------
+export const utilityMeterReadings = pgTable(
+  'utility_meter_readings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    propertyId: uuid('property_id')
+      .notNull()
+      .references(() => properties.id, { onDelete: 'cascade' }),
+    utilityType: utilityTypeEnum('utility_type').notNull(),
+    readingDate: date('reading_date').notNull(),
+    readingValue: numeric('reading_value', { precision: 12, scale: 2 }).notNull(),
+    note: text('note'),
+    recordedBy: uuid('recorded_by').references(() => profiles.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('utility_meter_readings_property_type_date_unique').on(
+      table.propertyId,
+      table.utilityType,
+      table.readingDate
+    ),
+  ]
+)
+
+export const utilityMeterReadingsRelations = relations(utilityMeterReadings, ({ one }) => ({
+  property: one(properties, {
+    fields: [utilityMeterReadings.propertyId],
+    references: [properties.id],
+  }),
+  recorder: one(profiles, {
+    fields: [utilityMeterReadings.recordedBy],
+    references: [profiles.id],
+  }),
+}))
+
+// ---------------------------------------------------------------------------
 // Type aliases
 // ---------------------------------------------------------------------------
 export type Organization = typeof organizations.$inferSelect
@@ -840,3 +914,9 @@ export type NewSopItemCompletion = typeof sopItemCompletions.$inferInsert
 
 export type AllowedEmail = typeof allowedEmails.$inferSelect
 export type NewAllowedEmail = typeof allowedEmails.$inferInsert
+
+export type UtilityRateTier = typeof utilityRateTiers.$inferSelect
+export type NewUtilityRateTier = typeof utilityRateTiers.$inferInsert
+
+export type UtilityMeterReading = typeof utilityMeterReadings.$inferSelect
+export type NewUtilityMeterReading = typeof utilityMeterReadings.$inferInsert
