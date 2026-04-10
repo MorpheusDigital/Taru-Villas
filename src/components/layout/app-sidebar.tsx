@@ -16,6 +16,7 @@ import {
   UtensilsCrossed,
   ListChecks,
   ClipboardList,
+  ShieldCheck,
 } from 'lucide-react'
 
 import { useAuth } from '@/components/providers/auth-provider'
@@ -79,6 +80,7 @@ const adminNavItems: NavItem[] = [
   { title: 'Manage Templates', href: '/admin/templates', icon: FileText },
   { title: 'Manage SOPs', href: '/admin/sops', icon: ClipboardList },
   { title: 'Manage Users', href: '/admin/users', icon: Users },
+  { title: 'Allowed Emails', href: '/admin/allowed-emails', icon: ShieldCheck },
 ]
 
 // ---------------------------------------------------------------------------
