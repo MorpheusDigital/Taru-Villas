@@ -17,6 +17,7 @@ import {
   ListChecks,
   ClipboardList,
   ShieldCheck,
+  Gauge,
 } from 'lucide-react'
 
 import { useAuth } from '@/components/providers/auth-provider'
@@ -71,6 +72,7 @@ const propertyNavItems: NavItem[] = [
   { title: 'Excursions', href: '/excursions', icon: Compass },
   { title: 'Menus', href: '/menus', icon: UtensilsCrossed },
   { title: 'SOP Dashboard', href: '/sops/dashboard', icon: ClipboardList },
+  { title: 'Utilities', href: '/utilities', icon: Gauge },
 ]
 
 const adminNavItems: NavItem[] = [

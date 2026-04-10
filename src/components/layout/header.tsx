@@ -28,6 +28,7 @@ const segmentLabels: Record<string, string> = {
   excursions: 'Excursions',
   menus: 'Menus',
   'allowed-emails': 'Allowed Emails',
+  utilities: 'Utilities',
 }
 
 function getPageTitle(pathname: string): string {
