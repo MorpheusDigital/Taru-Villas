@@ -33,7 +33,7 @@ export default async function UtilitiesPage({
 
   return (
     <UtilitiesPageClient
-      property={{ id: property.id, name: property.name, code: property.code }}
+      property={{ id: property.id, name: property.name, code: property.code, slug: property.slug }}
       isAdmin={profile.role === 'admin'}
     />
   )

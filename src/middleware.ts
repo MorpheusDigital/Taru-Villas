@@ -42,7 +42,9 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname.startsWith('/g/') ||
     request.nextUrl.pathname.startsWith('/e/') ||
     request.nextUrl.pathname.startsWith('/m/') ||
-    request.nextUrl.pathname.startsWith('/api/surveys/guest')
+    request.nextUrl.pathname.startsWith('/u/') ||
+    request.nextUrl.pathname.startsWith('/api/surveys/guest') ||
+    request.nextUrl.pathname.startsWith('/api/utilities/public')
 
   if (isPublicRoute) return supabaseResponse
 

@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Droplets, Zap } from 'lucide-react'
+import { ArrowLeft, Droplets, Zap, Link2, Check } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
@@ -19,7 +20,7 @@ import { UtilityReadingForm } from '@/components/admin/utility-reading-form'
 import { UtilityTierForm } from '@/components/admin/utility-tier-form'
 
 interface UtilitiesPageClientProps {
-  property: { id: string; name: string; code: string }
+  property: { id: string; name: string; code: string; slug: string }
   isAdmin: boolean
 }
 
@@ -176,8 +177,21 @@ export function UtilitiesPageClient({ property, isAdmin }: UtilitiesPageClientPr
           </div>
         </div>
 
-        {/* Month/Year Selectors */}
+        {/* Controls */}
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const url = `${window.location.origin}/u/${property.slug}`
+              navigator.clipboard.writeText(url)
+              toast.success('Public link copied to clipboard')
+            }}
+          >
+            <Link2 className="size-4" />
+            Copy Public Link
+          </Button>
+
           <Select
             value={String(month)}
             onValueChange={(v) => setMonth(parseInt(v))}
