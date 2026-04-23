@@ -14,7 +14,6 @@ import {
   Compass,
   UtensilsCrossed,
   ListChecks,
-  ClipboardList,
   ShieldCheck,
   Gauge,
 } from 'lucide-react'
@@ -70,12 +69,10 @@ const mainNavItems: NavItem[] = [
 const propertyNavItems: NavItem[] = [
   { title: 'Excursions', href: '/excursions', icon: Compass },
   { title: 'Menus', href: '/menus', icon: UtensilsCrossed },
-  { title: 'SOP Progress', href: '/sops/dashboard', icon: ClipboardList },
 ]
 
 const adminNavItems: NavItem[] = [
   { title: 'Property Settings', href: '/admin/properties', icon: Building2 },
-  { title: 'SOP Templates', href: '/admin/sops', icon: ClipboardList },
   { title: 'Users', href: '/admin/users', icon: Users },
   { title: 'Allowed Emails', href: '/admin/allowed-emails', icon: ShieldCheck },
 ]

@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { SopCompletion } from './sop-completion'
+import { SopsAreaTabs } from './sops-area-tabs'
 import { isOverdue } from '@/lib/sops/types'
 import type { SopAssignmentForUser } from '@/lib/sops/types'
 
@@ -83,11 +84,14 @@ export function MySopsClient({ assignments }: MySopsClientProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">My SOPs</h1>
-        <p className="text-sm text-muted-foreground">
-          Complete your assigned standard operating procedures
-        </p>
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">SOPs</h1>
+          <p className="text-sm text-muted-foreground">
+            Complete your assigned standard operating procedures
+          </p>
+        </div>
+        <SopsAreaTabs />
       </div>
 
       {/* Summary stats */}

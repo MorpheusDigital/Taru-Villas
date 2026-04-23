@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/table'
 import { Progress } from '@/components/ui/progress'
 
+import { SopsAreaTabs } from './sops-area-tabs'
 import { isOverdue } from '@/lib/sops/types'
 import type { SopDashboardRow } from '@/lib/sops/types'
 
@@ -168,11 +169,14 @@ export function SopDashboardClient({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">SOP Progress</h1>
-        <p className="text-sm text-muted-foreground">
-          Monitor SOP completion across properties and users
-        </p>
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">SOPs</h1>
+          <p className="text-sm text-muted-foreground">
+            Monitor SOP completion across properties and users
+          </p>
+        </div>
+        <SopsAreaTabs />
       </div>
 
       {/* Summary stats */}

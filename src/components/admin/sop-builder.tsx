@@ -179,7 +179,7 @@ export function SopBuilder({ initialData }: SopBuilderProps) {
       if (isEditing) {
         router.refresh()
       } else {
-        router.push(`/admin/sops/${result.id}`)
+        router.push(`/sops/templates/${result.id}`)
       }
     } catch (error) {
       console.error('Save error:', error)

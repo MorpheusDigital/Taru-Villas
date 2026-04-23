@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { SopsAreaTabs } from '@/components/sops/sops-area-tabs'
 import { Plus, ClipboardList } from 'lucide-react'
 
 export default async function AdminSopsPage() {
@@ -23,20 +24,20 @@ export default async function AdminSopsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            SOP Templates
-          </h1>
+          <h1 className="text-2xl font-bold tracking-tight">SOPs</h1>
           <p className="text-muted-foreground">
             Create and manage Standard Operating Procedure checklists.
           </p>
         </div>
         <Button asChild>
-          <Link href="/admin/sops/new">
+          <Link href="/sops/templates/new">
             <Plus className="size-4" />
             Create SOP
           </Link>
         </Button>
       </div>
+
+      <SopsAreaTabs />
 
       <Separator />
 
@@ -51,7 +52,7 @@ export default async function AdminSopsPage() {
               procedures for your properties.
             </p>
             <Button asChild className="mt-6">
-              <Link href="/admin/sops/new">
+              <Link href="/sops/templates/new">
                 <Plus className="size-4" />
                 Create SOP
               </Link>
@@ -91,7 +92,7 @@ export default async function AdminSopsPage() {
                   {template.isActive ? 'Active' : 'Inactive'}
                 </Badge>
                 <Button variant="outline" size="sm" asChild>
-                  <Link href={`/admin/sops/${template.id}`}>Edit</Link>
+                  <Link href={`/sops/templates/${template.id}`}>Edit</Link>
                 </Button>
               </CardFooter>
             </Card>
