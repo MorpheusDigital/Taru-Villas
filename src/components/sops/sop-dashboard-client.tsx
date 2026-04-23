@@ -169,7 +169,7 @@ export function SopDashboardClient({
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">SOP Dashboard</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">SOP Progress</h1>
         <p className="text-sm text-muted-foreground">
           Monitor SOP completion across properties and users
         </p>

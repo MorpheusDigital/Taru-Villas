@@ -62,7 +62,7 @@ export function PropertiesPageClient({ properties, allUsers = [] }: PropertiesPa
       {/* Page Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Properties</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Property Settings</h1>
           <p className="text-sm text-muted-foreground">
             Manage all properties across the portfolio
           </p>

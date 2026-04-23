@@ -6,7 +6,7 @@ import { UtilitiesPageClient } from '@/components/admin/utilities-page-client'
 export const dynamic = 'force-dynamic'
 
 export const metadata = {
-  title: 'Utilities | Taru Villas',
+  title: 'Meter Readings | Taru Villas',
 }
 
 export default async function UtilitiesPage({

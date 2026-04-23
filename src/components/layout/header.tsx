@@ -18,8 +18,8 @@ const segmentLabels: Record<string, string> = {
   surveys: 'Surveys',
   settings: 'Settings',
   properties: 'Properties',
-  admin: 'Admin',
-  templates: 'Templates',
+  admin: 'Setup',
+  templates: 'Survey Templates',
   users: 'Users',
   new: 'New',
   edit: 'Edit',
@@ -28,7 +28,7 @@ const segmentLabels: Record<string, string> = {
   excursions: 'Excursions',
   menus: 'Menus',
   'allowed-emails': 'Allowed Emails',
-  utilities: 'Utilities',
+  utilities: 'Meter Readings',
 }
 
 function getPageTitle(pathname: string): string {

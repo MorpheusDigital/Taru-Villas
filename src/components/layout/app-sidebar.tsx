@@ -61,27 +61,24 @@ interface NavItem {
 
 const mainNavItems: NavItem[] = [
   { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { title: 'Take A Survey', href: '/surveys', icon: ClipboardCheck },
-  { title: 'My SOPs', href: '/sops', icon: ListChecks },
+  { title: 'Surveys', href: '/surveys', icon: ClipboardCheck },
   { title: 'Tasks', href: '/tasks', icon: ListTodo },
+  { title: 'SOPs', href: '/sops', icon: ListChecks },
+  { title: 'Meter Readings', href: '/utilities', icon: Gauge },
   { title: 'Settings', href: '/settings', icon: Settings },
 ]
 
 const propertyNavItems: NavItem[] = [
-  { title: 'My Properties', href: '/properties', icon: Building2 },
   { title: 'Excursions', href: '/excursions', icon: Compass },
   { title: 'Menus', href: '/menus', icon: UtensilsCrossed },
-  { title: 'SOP Dashboard', href: '/sops/dashboard', icon: ClipboardList },
-  { title: 'Utilities', href: '/utilities', icon: Gauge },
+  { title: 'SOP Progress', href: '/sops/dashboard', icon: ClipboardList },
 ]
 
 const adminNavItems: NavItem[] = [
-  { title: 'Manage Properties', href: '/admin/properties', icon: Building2 },
-  { title: 'Submitted Surveys', href: '/admin/surveys', icon: ClipboardCheck },
-  { title: 'Manage Tasks', href: '/admin/tasks', icon: ListTodo },
-  { title: 'Manage Templates', href: '/admin/templates', icon: FileText },
-  { title: 'Manage SOPs', href: '/admin/sops', icon: ClipboardList },
-  { title: 'Manage Users', href: '/admin/users', icon: Users },
+  { title: 'Property Settings', href: '/admin/properties', icon: Building2 },
+  { title: 'Survey Templates', href: '/admin/templates', icon: FileText },
+  { title: 'SOP Templates', href: '/admin/sops', icon: ClipboardList },
+  { title: 'Users', href: '/admin/users', icon: Users },
   { title: 'Allowed Emails', href: '/admin/allowed-emails', icon: ShieldCheck },
 ]
 
@@ -168,7 +165,7 @@ export function AppSidebar() {
       {/* ---- Main Navigation ---- */}
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel>Main</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {visibleMainNavItems.map((item) => (
@@ -192,7 +189,7 @@ export function AppSidebar() {
         {/* ---- Properties Section (Property Manager + Admin) ---- */}
         {showPropertySection && (
           <SidebarGroup>
-            <SidebarGroupLabel>Properties</SidebarGroupLabel>
+            <SidebarGroupLabel>Property Content</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {propertyNavItems.map((item) => (
@@ -217,7 +214,7 @@ export function AppSidebar() {
         {/* ---- Admin Section ---- */}
         {showAdminSection && (
           <SidebarGroup>
-            <SidebarGroupLabel>Administration</SidebarGroupLabel>
+            <SidebarGroupLabel>Setup & Permissions</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {adminNavItems.map((item) => (

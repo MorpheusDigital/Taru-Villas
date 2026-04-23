@@ -169,7 +169,7 @@ export function UtilitiesPageClient({ property, isAdmin }: UtilitiesPageClientPr
           </Button>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
-              Utilities — {property.name}
+              Meter Readings — {property.name}
             </h1>
             <p className="text-sm text-muted-foreground">
               Track meter readings and monitor utility costs
