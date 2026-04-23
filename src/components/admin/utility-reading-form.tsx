@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { prepareImage, extractMeterReading } from '@/lib/utilities/ocr'
 
 function nowIST(): string {
   return new Date().toLocaleString('en-IN', {
@@ -19,53 +20,6 @@ function nowIST(): string {
     minute: '2-digit',
     hour12: true,
   }) + ' IST'
-}
-
-async function prepareImage(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    const url = URL.createObjectURL(file)
-    img.onload = () => {
-      const MAX = 1024
-      const scale = Math.min(1, MAX / Math.max(img.width, img.height))
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.round(img.width * scale)
-      canvas.height = Math.round(img.height * scale)
-      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
-      URL.revokeObjectURL(url)
-      resolve(canvas.toDataURL('image/jpeg', 0.9))
-    }
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Failed to load image')) }
-    img.src = url
-  })
-}
-
-async function extractReading(imageDataUrl: string): Promise<number> {
-  try {
-    console.log('Starting OCR processing...')
-    const { createWorker } = await import('tesseract.js')
-    console.log('Tesseract imported successfully')
-    const worker = await createWorker('eng')
-    console.log('Worker created')
-    await worker.setParameters({
-      tessedit_char_whitelist: '0123456789.',
-      // @ts-expect-error – tesseract string param
-      tessedit_pageseg_mode: '7',
-    })
-    console.log('Parameters set')
-    const { data: { text } } = await worker.recognize(imageDataUrl)
-    console.log('OCR result:', text)
-    await worker.terminate()
-
-    const cleaned = text.trim().replace(/[^0-9.]/g, '')
-    console.log('Cleaned text:', cleaned)
-    const value = parseFloat(cleaned)
-    if (!cleaned || isNaN(value)) throw new Error('Could not read meter value from image')
-    return value
-  } catch (error) {
-    console.error('OCR Error:', error)
-    throw error
-  }
 }
 
 interface ReadingFormProps {
@@ -101,7 +55,7 @@ export function UtilityReadingForm({
     try {
       const imageDataUrl = await prepareImage(file)
       setScannedPreview(imageDataUrl)
-      const value = await extractReading(imageDataUrl)
+      const value = await extractMeterReading(imageDataUrl)
       setReadingValue(String(value))
       setReadingTimestamp(nowIST())
       setIsScannedReading(true)
