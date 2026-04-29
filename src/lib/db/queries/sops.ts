@@ -5,6 +5,7 @@ import {
   sopSections,
   sopItems,
   sopAssignments,
+  sopCategories,
   sopCompletions,
   sopItemCompletions,
   properties,
@@ -293,10 +294,12 @@ export async function getAssignmentsForUser(
       assignment: sopAssignments,
       template: sopTemplates,
       property: properties,
+      category: sopCategories,
     })
     .from(sopAssignments)
     .innerJoin(sopTemplates, eq(sopAssignments.templateId, sopTemplates.id))
     .innerJoin(properties, eq(sopAssignments.propertyId, properties.id))
+    .leftJoin(sopCategories, eq(sopTemplates.categoryId, sopCategories.id))
     .where(
       and(
         eq(sopAssignments.userId, userId),
@@ -367,6 +370,9 @@ export async function getAssignmentsForUser(
         items: itemsByTemplate.get(r.template.id) ?? [],
       },
       property: r.property,
+      category: r.category
+        ? { id: r.category.id, name: r.category.name, sortOrder: r.category.sortOrder }
+        : null,
       currentDueDate: dueDate,
       currentCompletion: completion
         ? {

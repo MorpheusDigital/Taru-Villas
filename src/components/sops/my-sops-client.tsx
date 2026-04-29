@@ -1,14 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { format } from 'date-fns'
-import {
-  ListChecks,
-  Clock,
-  AlertTriangle,
-  CheckCircle2,
-  Building2,
-} from 'lucide-react'
+import { ListChecks, Building2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -55,6 +48,27 @@ export function MySopsClient({ assignments }: MySopsClientProps) {
     }
 
     return result
+  }, [assignments])
+
+  type CategoryGroup = {
+    key: string
+    label: string
+    sortOrder: number
+    items: SopAssignmentForUser[]
+  }
+
+  const categoryGroups = useMemo(() => {
+    const map = new Map<string, CategoryGroup>()
+    for (const a of assignments) {
+      const key = a.category?.id ?? '__uncategorized__'
+      const label = a.category?.name ?? 'Uncategorized'
+      const sortOrder = a.category?.sortOrder ?? Number.MAX_SAFE_INTEGER
+      if (!map.has(key)) {
+        map.set(key, { key, label, sortOrder, items: [] })
+      }
+      map.get(key)!.items.push(a)
+    }
+    return Array.from(map.values()).sort((a, b) => a.sortOrder - b.sortOrder)
   }, [assignments])
 
   const getProgress = (a: SopAssignmentForUser) => {
@@ -129,77 +143,41 @@ export function MySopsClient({ assignments }: MySopsClientProps) {
         </Card>
       ) : (
         <div className="space-y-6">
-          {/* Overdue */}
-          {grouped.overdue.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="size-4 text-red-600" />
-                <h2 className="text-sm font-semibold text-red-600 uppercase tracking-wide">
-                  Overdue
-                </h2>
-              </div>
+          {categoryGroups.map((group) => (
+            <section key={group.key} className="space-y-3">
+              <h2 className="flex items-center gap-2 text-sm font-semibold tracking-tight text-foreground/80">
+                {group.label}
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-normal text-muted-foreground">
+                  {group.items.length}
+                </span>
+              </h2>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {grouped.overdue.map((a) => (
-                  <SopCard
-                    key={a.id}
-                    assignment={a}
-                    variant="overdue"
-                    progress={getProgress(a)}
-                    checkedCount={getCheckedCount(a)}
-                    onClick={() => setSelectedAssignment(a)}
-                  />
-                ))}
+                {group.items.map((a) => {
+                  const completion = a.currentCompletion
+                  const variant =
+                    completion?.status === 'completed'
+                      ? 'completed'
+                      : isOverdue(a.currentDueDate, a.deadlineTime)
+                        ? 'overdue'
+                        : 'due'
+                  return (
+                    <SopCard
+                      key={a.id}
+                      assignment={a}
+                      variant={variant}
+                      progress={variant === 'completed' ? 100 : getProgress(a)}
+                      checkedCount={
+                        variant === 'completed'
+                          ? a.template.items.length
+                          : getCheckedCount(a)
+                      }
+                      onClick={() => setSelectedAssignment(a)}
+                    />
+                  )
+                })}
               </div>
-            </div>
-          )}
-
-          {/* Due Today */}
-          {grouped.dueToday.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Clock className="size-4 text-blue-600" />
-                <h2 className="text-sm font-semibold text-blue-600 uppercase tracking-wide">
-                  Due Today
-                </h2>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {grouped.dueToday.map((a) => (
-                  <SopCard
-                    key={a.id}
-                    assignment={a}
-                    variant="due"
-                    progress={getProgress(a)}
-                    checkedCount={getCheckedCount(a)}
-                    onClick={() => setSelectedAssignment(a)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Completed */}
-          {grouped.completed.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="size-4 text-emerald-600" />
-                <h2 className="text-sm font-semibold text-emerald-600 uppercase tracking-wide">
-                  Completed
-                </h2>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {grouped.completed.map((a) => (
-                  <SopCard
-                    key={a.id}
-                    assignment={a}
-                    variant="completed"
-                    progress={100}
-                    checkedCount={a.template.items.length}
-                    onClick={() => setSelectedAssignment(a)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
+            </section>
+          ))}
         </div>
       )}
     </div>

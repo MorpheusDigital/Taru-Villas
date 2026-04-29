@@ -38,6 +38,7 @@ export type SopCompletionWithItems = SopCompletion & {
 export type SopAssignmentForUser = SopAssignment & {
   template: SopTemplate & { items: SopItem[] }
   property: Property
+  category: { id: string; name: string; sortOrder: number } | null
   currentCompletion: SopCompletionWithItems | null
   currentDueDate: string
 }
