@@ -32,6 +32,12 @@ const tabs: Tab[] = [
     match: (p) => p.startsWith('/sops/templates'),
     roles: ['admin'],
   },
+  {
+    label: 'Categories',
+    href: '/sops/categories',
+    match: (p) => p.startsWith('/sops/categories'),
+    roles: ['admin'],
+  },
 ]
 
 export function SopsAreaTabs() {
