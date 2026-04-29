@@ -54,6 +54,7 @@ const createSopSectionSchema = z.object({
 const createSopTemplateSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
+  categoryId: z.string().uuid(),
   sections: z.array(createSopSectionSchema).optional(),
   ungroupedItems: z.array(createSopItemSchema).optional(),
 })
@@ -80,13 +81,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { name, description, sections, ungroupedItems } = parsed.data
+    const { name, description, categoryId, sections, ungroupedItems } = parsed.data
+
+    // Validate category belongs to the same org
+    const { getCategoryById } = await import('@/lib/db/queries/categories')
+    const category = await getCategoryById(categoryId)
+    if (!category || category.orgId !== profile.orgId) {
+      return NextResponse.json({ error: 'Invalid category' }, { status: 400 })
+    }
 
     // Create template
     const template = await createTemplate({
       orgId: profile.orgId,
       name,
       description: description ?? null,
+      categoryId,
     })
 
     // Create sections + their items

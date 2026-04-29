@@ -69,6 +69,7 @@ const updateTemplateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().nullable().optional(),
   isActive: z.boolean().optional(),
+  categoryId: z.string().uuid().nullable().optional(),
   sections: z.array(updateSectionSchema).optional(),
   ungroupedItems: z.array(updateItemSchema).optional(),
 })
@@ -101,14 +102,24 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       )
     }
 
-    const { name, description, isActive, sections, ungroupedItems } = parsed.data
+    const { name, description, isActive, categoryId, sections, ungroupedItems } = parsed.data
+
+    // Validate category FK if a non-null value was provided
+    if (categoryId) {
+      const { getCategoryById } = await import('@/lib/db/queries/categories')
+      const category = await getCategoryById(categoryId)
+      if (!category || category.orgId !== profile.orgId) {
+        return NextResponse.json({ error: 'Invalid category' }, { status: 400 })
+      }
+    }
 
     // Update template metadata
-    if (name !== undefined || description !== undefined || isActive !== undefined) {
+    if (name !== undefined || description !== undefined || isActive !== undefined || categoryId !== undefined) {
       await updateTemplate(id, {
         ...(name !== undefined && { name }),
         ...(description !== undefined && { description }),
         ...(isActive !== undefined && { isActive }),
+        ...(categoryId !== undefined && { categoryId }),
       })
     }
 
