@@ -2,20 +2,10 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { format } from 'date-fns'
-import { Plus, Trash2, UserPlus } from 'lucide-react'
+import { Trash2, UserPlus } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import {
   Table,
   TableBody,
@@ -24,16 +14,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-} from '@/components/ui/dialog'
 
 import type { SopAssignmentWithDetails } from '@/lib/db/queries/sops'
+import { SopMultiAssignDialog } from './sop-multi-assign-dialog'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,59 +50,8 @@ export function SopAssignments({
   users,
 }: SopAssignmentsProps) {
   const router = useRouter()
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const [multiAssignOpen, setMultiAssignOpen] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
-
-  // Form state
-  const [userId, setUserId] = useState('')
-  const [propertyId, setPropertyId] = useState('')
-  const [frequency, setFrequency] = useState<string>('daily')
-  const [deadlineTime, setDeadlineTime] = useState('09:00')
-  const [deadlineDay, setDeadlineDay] = useState<string>('')
-
-  const resetForm = () => {
-    setUserId('')
-    setPropertyId('')
-    setFrequency('daily')
-    setDeadlineTime('09:00')
-    setDeadlineDay('')
-  }
-
-  const handleCreate = async () => {
-    if (!userId || !propertyId) return
-    setSaving(true)
-    try {
-      const res = await fetch('/api/sops/assignments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          templateId,
-          userId,
-          propertyId,
-          frequency,
-          deadlineTime,
-          deadlineDay:
-            frequency === 'daily'
-              ? null
-              : deadlineDay
-                ? parseInt(deadlineDay)
-                : null,
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error || 'Failed to create')
-      }
-      setDialogOpen(false)
-      resetForm()
-      router.refresh()
-    } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to create assignment')
-    } finally {
-      setSaving(false)
-    }
-  }
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this assignment?')) return
@@ -163,126 +95,18 @@ export function SopAssignments({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Assignments</h2>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm">
-              <UserPlus className="size-4" />
-              Add Assignment
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add Assignment</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>User</Label>
-                <Select value={userId} onValueChange={setUserId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select user..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {users.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.fullName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Property</Label>
-                <Select value={propertyId} onValueChange={setPropertyId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select property..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {properties.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Frequency</Label>
-                <Select value={frequency} onValueChange={setFrequency}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Deadline Time</Label>
-                <Input
-                  type="time"
-                  value={deadlineTime}
-                  onChange={(e) => setDeadlineTime(e.target.value)}
-                />
-              </div>
-
-              {frequency === 'weekly' && (
-                <div className="space-y-2">
-                  <Label>Day of Week</Label>
-                  <Select value={deadlineDay} onValueChange={setDeadlineDay}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select day..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0">Monday</SelectItem>
-                      <SelectItem value="1">Tuesday</SelectItem>
-                      <SelectItem value="2">Wednesday</SelectItem>
-                      <SelectItem value="3">Thursday</SelectItem>
-                      <SelectItem value="4">Friday</SelectItem>
-                      <SelectItem value="5">Saturday</SelectItem>
-                      <SelectItem value="6">Sunday</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              {frequency === 'monthly' && (
-                <div className="space-y-2">
-                  <Label>Day of Month</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={28}
-                    value={deadlineDay}
-                    onChange={(e) => setDeadlineDay(e.target.value)}
-                    placeholder="1-28"
-                  />
-                </div>
-              )}
-            </div>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setDialogOpen(false)
-                  resetForm()
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleCreate}
-                disabled={saving || !userId || !propertyId}
-              >
-                {saving ? 'Creating...' : 'Create'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <Button size="sm" onClick={() => setMultiAssignOpen(true)}>
+          <UserPlus className="size-4" />
+          Add Assignments
+        </Button>
+        <SopMultiAssignDialog
+          open={multiAssignOpen}
+          onOpenChange={setMultiAssignOpen}
+          templateId={templateId}
+          users={users}
+          properties={properties}
+          onCreated={() => router.refresh()}
+        />
       </div>
 
       {initialAssignments.length === 0 ? (

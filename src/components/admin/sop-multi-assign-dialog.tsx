@@ -21,9 +21,19 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import type { Profile, Property } from '@/lib/db/schema'
 
 type Frequency = 'daily' | 'weekly' | 'monthly'
+
+interface UserOption {
+  id: string
+  fullName: string | null
+  email?: string | null
+}
+
+interface PropertyOption {
+  id: string
+  name: string
+}
 
 interface RowState {
   userId: string
@@ -38,8 +48,8 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   templateId: string
-  users: Profile[]
-  properties: Property[]
+  users: UserOption[]
+  properties: PropertyOption[]
   onCreated: () => void
 }
 
