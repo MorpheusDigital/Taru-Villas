@@ -678,3 +678,37 @@ export async function getExistingAssignmentPairs(
     .where(eq(sopAssignments.templateId, templateId))
   return rows
 }
+
+export interface BatchAssignmentRow {
+  templateId: string
+  userId: string
+  propertyId: string
+  frequency: 'daily' | 'weekly' | 'monthly'
+  deadlineTime: string
+  deadlineDay: number | null
+  notifyOnOverdue: boolean
+}
+
+export async function batchCreateAssignments(
+  rows: BatchAssignmentRow[]
+): Promise<{ created: number; skipped: number }> {
+  if (rows.length === 0) return { created: 0, skipped: 0 }
+
+  let created = 0
+  let skipped = 0
+
+  for (const row of rows) {
+    try {
+      await db.insert(sopAssignments).values(row)
+      created++
+    } catch (e: any) {
+      if (e?.code === '23505') {
+        skipped++
+      } else {
+        throw e
+      }
+    }
+  }
+
+  return { created, skipped }
+}
