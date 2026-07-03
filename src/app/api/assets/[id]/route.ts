@@ -35,6 +35,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const { id } = await params
   const profile = await getProfile()
   if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
   const { asset, forbidden } = await loadAndAuthorize(profile, id)
   if (forbidden) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   if (!asset) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -45,6 +46,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const { id } = await params
   const profile = await getProfile()
   if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
   if (profile.role === 'staff') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { asset, forbidden } = await loadAndAuthorize(profile, id)
   if (forbidden) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -65,6 +67,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
   const { id } = await params
   const profile = await getProfile()
   if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
   if (profile.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   await deleteAsset(id) // asset_events + maintenance_logs cascade-delete with the asset
   return NextResponse.json({ ok: true })
