@@ -23,10 +23,10 @@ const patchSchema = z.object({
 async function loadAndAuthorize(profile: { id: string; role: string }, id: string) {
   const includeFinancials = profile.role !== 'staff'
   const asset = await getAssetById(id, includeFinancials)
-  if (!asset) return { asset: null as const }
+  if (!asset) return { asset: null }
   if (profile.role === 'property_manager') {
     const props = await getUserProperties(profile.id, 'property_manager')
-    if (props && !props.includes(asset.propertyId)) return { asset: null as const, forbidden: true }
+    if (props && !props.includes(asset.propertyId)) return { asset: null, forbidden: true }
   }
   return { asset }
 }
