@@ -1267,8 +1267,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
   const profile = await getProfile()
   if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (profile.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  await deleteAsset(id)
-  await logAssetEvent(id, profile.id, 'status_changed', 'deleted') // best-effort audit
+  await deleteAsset(id) // asset_events + maintenance_logs cascade-delete with the asset
   return NextResponse.json({ ok: true })
 }
 ```
