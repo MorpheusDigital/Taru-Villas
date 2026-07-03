@@ -26,7 +26,12 @@ export default async function AssetDetailPage({
     }
   }
 
-  const logs = await getMaintenanceLogsForAsset(id)
+  const rawLogs = await getMaintenanceLogsForAsset(id)
+  // repairCost is a financial figure — strip it before it ever reaches the
+  // client props payload for staff. The component render-gates on
+  // showFinancials too, but that only hides the DOM output; the prop value
+  // is still serialized into the page source unless we strip it here.
+  const logs = showFinancials ? rawLogs : rawLogs.map((l) => ({ ...l, repairCost: null }))
 
   return (
     <AssetDetail

@@ -1,4 +1,4 @@
-import { eq, and, inArray, ilike, or, desc, sql } from 'drizzle-orm'
+import { eq, and, inArray, ilike, or, desc } from 'drizzle-orm'
 import { db } from '..'
 import {
   assets, rooms, properties, assetEvents,
@@ -150,15 +150,28 @@ export async function getAssetById(
   return includeFinancials ? toFinancial(rows[0]) : toPhysical(rows[0])
 }
 
+// Deletion-safe, race-tolerant sequence: derives the next number from the
+// MAX existing numeric suffix for this (propertyId, category), not a row
+// count. A count-based sequence re-collides with an existing asset_code
+// once a middle asset is deleted (count drops but the higher-numbered code
+// still exists). Codes without a trailing `-<digits>` suffix (legacy or
+// user-edited codes) are ignored — they don't participate in the sequence.
 export async function getNextAssetSequence(
   propertyId: string,
   category: AssetCategory,
 ): Promise<number> {
-  const [{ count }] = await db
-    .select({ count: sql<number>`count(*)::int` })
+  const rows = await db
+    .select({ assetCode: assets.assetCode })
     .from(assets)
     .where(and(eq(assets.propertyId, propertyId), eq(assets.category, category)))
-  return Number(count) + 1
+  let max = 0
+  for (const { assetCode } of rows) {
+    const match = /-(\d+)$/.exec(assetCode)
+    if (!match) continue
+    const n = Number(match[1])
+    if (n > max) max = n
+  }
+  return max + 1
 }
 
 export async function createAsset(input: NewAsset): Promise<Asset> {

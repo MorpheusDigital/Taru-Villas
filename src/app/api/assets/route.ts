@@ -8,6 +8,7 @@ import {
 import { buildAssetCode } from '@/lib/assets/asset-code'
 import { ASSET_CATEGORIES, ASSET_STATUSES } from '@/lib/assets/labels'
 import { getPropertyById } from '@/lib/db/queries/properties'
+import type { Property } from '@/lib/db/schema'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://tvpl.morpheusds.com'
 
@@ -71,38 +72,62 @@ export async function POST(request: NextRequest) {
   }
 
   const id = randomUUID()
-  let assetCode = data.assetCode
-  if (!assetCode) {
-    const property = await getPropertyById(data.propertyId)
+  const explicitCode = Boolean(data.assetCode)
+  let assetCode: string = data.assetCode ?? ''
+  let property: Property | undefined
+  let seq = 0
+
+  if (!explicitCode) {
+    property = await getPropertyById(data.propertyId)
     if (!property) return NextResponse.json({ error: 'Unknown property' }, { status: 400 })
-    const seq = await getNextAssetSequence(data.propertyId, data.category)
+    seq = await getNextAssetSequence(data.propertyId, data.category)
     assetCode = buildAssetCode(property.code, data.category, seq)
   }
 
-  try {
-    await createAsset({
-      id,
-      assetCode,
-      name: data.name,
-      category: data.category,
-      propertyId: data.propertyId,
-      roomId: data.roomId ?? null,
-      purchaseDate: data.purchaseDate,
-      purchaseCost: data.purchaseCost,
-      usefulLifeYears: data.usefulLifeYears,
-      salvageValue: data.salvageValue,
-      serialNumber: data.serialNumber ?? null,
-      vendorName: data.vendorName ?? null,
-      warrantyExpiry: data.warrantyExpiry ?? null,
-      imageUrl: data.imageUrl ?? null,
-      qrUrl: `${APP_URL}/scan/asset/${id}`,
-      createdBy: profile.id,
-    })
-    await logAssetEvent(id, profile.id, 'created')
-    return NextResponse.json({ id, assetCode }, { status: 201 })
-  } catch (e) {
-    if (e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === '23505')
-      return NextResponse.json({ error: 'Asset code already exists' }, { status: 409 })
-    throw e
+  // Auto-generated codes are race-safe: the sequence is read-then-written,
+  // so two concurrent creates (or a create racing a deletion-driven reuse)
+  // can compute the same code. When we generated the code ourselves, retry
+  // a bounded number of times by bumping the sequence on a unique-violation
+  // before giving up. Explicit (user-supplied) codes keep the original
+  // immediate-409 behavior — no retry, since we must not silently rename
+  // a code the user chose.
+  const maxAttempts = explicitCode ? 1 : 5
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      await createAsset({
+        id,
+        assetCode,
+        name: data.name,
+        category: data.category,
+        propertyId: data.propertyId,
+        roomId: data.roomId ?? null,
+        purchaseDate: data.purchaseDate,
+        purchaseCost: data.purchaseCost,
+        usefulLifeYears: data.usefulLifeYears,
+        salvageValue: data.salvageValue,
+        serialNumber: data.serialNumber ?? null,
+        vendorName: data.vendorName ?? null,
+        warrantyExpiry: data.warrantyExpiry ?? null,
+        imageUrl: data.imageUrl ?? null,
+        qrUrl: `${APP_URL}/scan/asset/${id}`,
+        createdBy: profile.id,
+      })
+      await logAssetEvent(id, profile.id, 'created')
+      return NextResponse.json({ id, assetCode }, { status: 201 })
+    } catch (e) {
+      const isCollision =
+        e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === '23505'
+      if (!isCollision) throw e
+      if (explicitCode || attempt === maxAttempts - 1) {
+        return NextResponse.json({ error: 'Asset code already exists' }, { status: 409 })
+      }
+      // Bump the sequence and recompute the code for the next attempt.
+      seq += 1
+      assetCode = buildAssetCode(property!.code, data.category, seq)
+    }
   }
+
+  // Unreachable — the loop above always returns, but TypeScript needs an
+  // explicit terminal return.
+  return NextResponse.json({ error: 'Asset code already exists' }, { status: 409 })
 }
