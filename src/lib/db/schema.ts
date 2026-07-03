@@ -83,6 +83,16 @@ export const utilityTypeEnum = pgEnum('utility_type', ['water', 'electricity'])
 
 export const readingSlotStatusEnum = pgEnum('reading_slot_status', ['manual', 'autofilled', 'edited'])
 
+export const assetCategoryEnum = pgEnum('asset_category', [
+  'ffe', 'machinery', 'kitchen', 'it', 'vehicles',
+])
+export const assetStatusEnum = pgEnum('asset_status', [
+  'active', 'in_repair', 'missing', 'disposed',
+])
+export const maintenanceStatusEnum = pgEnum('maintenance_status', [
+  'pending', 'resolved',
+])
+
 // ---------------------------------------------------------------------------
 // Organizations
 // ---------------------------------------------------------------------------
@@ -1387,3 +1397,102 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
 
 export type Project = typeof projects.$inferSelect
 export type NewProject = typeof projects.$inferInsert
+
+// ---------------------------------------------------------------------------
+// Fixed Asset Registry
+// ---------------------------------------------------------------------------
+export const rooms = pgTable(
+  'rooms',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    propertyId: uuid('property_id')
+      .notNull()
+      .references(() => properties.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    floorLevel: text('floor_level'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [unique('rooms_property_name_unique').on(t.propertyId, t.name)],
+)
+
+export const assets = pgTable('assets', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  assetCode: text('asset_code').notNull().unique(),
+  name: text('name').notNull(),
+  category: assetCategoryEnum('category').notNull(),
+  propertyId: uuid('property_id')
+    .notNull()
+    .references(() => properties.id, { onDelete: 'cascade' }),
+  roomId: uuid('room_id').references(() => rooms.id, { onDelete: 'set null' }),
+  purchaseDate: date('purchase_date').notNull(),
+  purchaseCost: numeric('purchase_cost', { precision: 12, scale: 2 }).notNull(),
+  usefulLifeYears: integer('useful_life_years').notNull(),
+  salvageValue: numeric('salvage_value', { precision: 12, scale: 2 }).default('0').notNull(),
+  status: assetStatusEnum('status').default('active').notNull(),
+  serialNumber: text('serial_number'),
+  vendorName: text('vendor_name'),
+  warrantyExpiry: date('warranty_expiry'),
+  imageUrl: text('image_url'),
+  qrUrl: text('qr_url').unique(),
+  lastAuditedAt: timestamp('last_audited_at', { withTimezone: true }),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const maintenanceLogs = pgTable('maintenance_logs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  assetId: uuid('asset_id')
+    .notNull()
+    .references(() => assets.id, { onDelete: 'cascade' }),
+  reportedBy: uuid('reported_by').references(() => profiles.id, { onDelete: 'set null' }),
+  serviceDate: date('service_date'),
+  issueDescription: text('issue_description').notNull(),
+  repairCost: numeric('repair_cost', { precision: 12, scale: 2 }),
+  resolutionStatus: maintenanceStatusEnum('resolution_status').default('pending').notNull(),
+  resolvedBy: uuid('resolved_by').references(() => profiles.id, { onDelete: 'set null' }),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const assetEvents = pgTable('asset_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  assetId: uuid('asset_id')
+    .notNull()
+    .references(() => assets.id, { onDelete: 'cascade' }),
+  actorId: uuid('actor_id').references(() => profiles.id, { onDelete: 'set null' }),
+  eventType: text('event_type').notNull(), // created | audited | moved | status_changed | repair_flagged
+  detail: text('detail'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const roomsRelations = relations(rooms, ({ one, many }) => ({
+  property: one(properties, { fields: [rooms.propertyId], references: [properties.id] }),
+  assets: many(assets),
+}))
+
+export const assetsRelations = relations(assets, ({ one, many }) => ({
+  property: one(properties, { fields: [assets.propertyId], references: [properties.id] }),
+  room: one(rooms, { fields: [assets.roomId], references: [rooms.id] }),
+  maintenanceLogs: many(maintenanceLogs),
+  events: many(assetEvents),
+}))
+
+export const maintenanceLogsRelations = relations(maintenanceLogs, ({ one }) => ({
+  asset: one(assets, { fields: [maintenanceLogs.assetId], references: [assets.id] }),
+}))
+
+export const assetEventsRelations = relations(assetEvents, ({ one }) => ({
+  asset: one(assets, { fields: [assetEvents.assetId], references: [assets.id] }),
+}))
+
+export type Room = typeof rooms.$inferSelect
+export type NewRoom = typeof rooms.$inferInsert
+export type Asset = typeof assets.$inferSelect
+export type NewAsset = typeof assets.$inferInsert
+export type MaintenanceLog = typeof maintenanceLogs.$inferSelect
+export type NewMaintenanceLog = typeof maintenanceLogs.$inferInsert
+export type AssetEvent = typeof assetEvents.$inferSelect
+export type NewAssetEvent = typeof assetEvents.$inferInsert
