@@ -128,13 +128,22 @@ function createColumns(showFinancials: boolean): ColumnDef<AssetTableRow>[] {
       accessorKey: 'assetCode',
       header: 'Code',
       cell: ({ row }) => (
-        <span className="font-mono text-xs">{row.original.assetCode}</span>
+        <Link
+          href={`/assets/${row.original.id}`}
+          className="font-mono text-xs hover:underline"
+        >
+          {row.original.assetCode}
+        </Link>
       ),
     },
     {
       accessorKey: 'name',
       header: 'Name',
-      cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+      cell: ({ row }) => (
+        <Link href={`/assets/${row.original.id}`} className="font-medium hover:underline">
+          {row.original.name}
+        </Link>
+      ),
     },
     {
       accessorKey: 'category',
