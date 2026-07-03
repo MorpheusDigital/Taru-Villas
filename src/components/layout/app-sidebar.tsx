@@ -19,6 +19,7 @@ import {
   Gauge,
   Trash2,
   UserCheck,
+  Package,
 } from 'lucide-react'
 
 import { useAuth } from '@/components/providers/auth-provider'
@@ -68,6 +69,7 @@ const mainNavItems: NavItem[] = [
   { title: 'SOPs', href: '/sops', icon: ListChecks },
   { title: 'Utilities', href: '/utilities', icon: Gauge },
   { title: 'Daily Wastage', href: '/waste', icon: Trash2 },
+  { title: 'Asset Registry', href: '/assets', icon: Package },
   { title: 'Settings', href: '/settings', icon: Settings },
 ]
 
