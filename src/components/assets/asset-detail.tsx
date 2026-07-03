@@ -26,6 +26,7 @@ import {
 import { categoryLabel, statusLabel, type AssetStatus } from '@/lib/assets/labels'
 import type { AssetRow, AssetFinancialRow } from '@/lib/db/queries/assets'
 import type { MaintenanceLogRow } from '@/lib/db/queries/maintenance'
+import { AssetQrLabel } from '@/components/assets/asset-qr-label'
 
 // ---------------------------------------------------------------------------
 // Financial narrowing
@@ -168,6 +169,8 @@ export function AssetDetail({ asset, logs, showFinancials, canEdit, canDelete }:
             />
           </div>
         )}
+
+        <AssetQrLabel qrUrl={asset.qrUrl} assetCode={asset.assetCode} name={asset.name} />
 
         <Card>
           <CardHeader>
