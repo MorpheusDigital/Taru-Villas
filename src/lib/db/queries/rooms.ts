@@ -11,6 +11,11 @@ export async function getRoomsForProperties(propertyIds: string[]): Promise<Room
   return db.select().from(rooms).where(inArray(rooms.propertyId, propertyIds)).orderBy(asc(rooms.name))
 }
 
+export async function getRoomById(id: string): Promise<Room | undefined> {
+  const [row] = await db.select().from(rooms).where(eq(rooms.id, id)).limit(1)
+  return row
+}
+
 export async function createRoom(input: {
   propertyId: string
   name: string
