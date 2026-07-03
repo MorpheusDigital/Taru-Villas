@@ -160,6 +160,9 @@ Set `DEV_BYPASS_AUTH=true` to skip auth (returns mock admin profile).
 - Guest fills survey without auth, records guestName/guestEmail
 - Links can be toggled active/inactive
 
+### Fixed Asset Registry
+- Property-scoped asset registry with rooms, straight-line depreciation (computed on read), maintenance logs, QR labels + mobile scan, guard-layer RBAC (staff financial-blind); routes under `/assets`
+
 ## Critical Implementation Notes
 
 ### Database Connection
@@ -187,6 +190,7 @@ Project uses Zod v4 (`^4.3.6`). Avoid strict `.url()` validators — use plain `
 # Required
 NEXT_PUBLIC_SUPABASE_URL="https://..."
 NEXT_PUBLIC_SUPABASE_ANON_KEY="eyJhbGc..."
+NEXT_PUBLIC_APP_URL="https://tvpl.morpheusds.com"  # Base URL for asset QR links; must be set in Coolify as "Available at Buildtime"
 SUPABASE_SERVICE_ROLE_KEY="eyJhbGc..."
 POSTGRES_URL="postgres://user:pass@host:6543/db"  # Transaction mode (port 6543)
 
