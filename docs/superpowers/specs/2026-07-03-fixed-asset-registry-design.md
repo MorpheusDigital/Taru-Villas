@@ -42,9 +42,9 @@ Property-Manager scoping clean and rooms optional.
   (e.g. `RAMPART-R1-FFE-001`). Suggested on the Add form, user can override. DB enforces uniqueness.
   Editable so legacy spreadsheet codes can be carried over.
 - **Categories:** fixed Postgres enum per the brief — `ffe`, `machinery`, `kitchen`, `it`, `vehicles`.
-- **Asset images:** real Supabase Storage upload (bucket `asset-images`). This is the one genuinely new
-  piece of infrastructure — the app currently stores images only as plain URL columns, with no Storage
-  usage. A small client upload helper is required.
+- **Asset images (v1):** plain image **URL** field (`imageUrl` text), consistent with how the app currently
+  stores all other images (property/menu covers are URL columns, no Storage). No upload infrastructure in
+  v1. Supabase Storage upload is a deferred follow-up (see §11).
 - **Scan target route is auth-gated** (staff and above), not public. Staff already have accounts.
 
 ## 4. Data model — migration `0023_fixed_asset_registry.sql`
@@ -80,7 +80,7 @@ display-formatted in the UI (matching `issue_status` etc.).
 - `serialNumber` text NULL
 - `vendorName` text NULL
 - `warrantyExpiry` date NULL
-- `imageUrl` text NULL  — Supabase Storage
+- `imageUrl` text NULL  — plain image URL (v1)
 - `qrUrl` text UNIQUE  — `${APP_URL}/scan/asset/{id}`, written on insert
 - `lastAuditedAt` timestamptz NULL
 - `createdBy` uuid → `profiles.id`
@@ -166,7 +166,7 @@ Follows the existing "one sidebar entry per domain, sub-views as tabs" conventio
     (financial export admin/PM only). "Add Asset" button (admin + PM).
   - **Rooms** (admin + PM) — manage rooms per property.
   - **Scan** (all) — "Tap to Scan" camera page.
-- **Add Asset** — 3-step form: General (name, category, image upload, serial) → Location (cascading
+- **Add Asset** — 3-step form: General (name, category, image URL, serial) → Location (cascading
   Property → Room dropdowns) → Financials (purchase date, cost, useful life, salvage; live annual-
   depreciation preview). Asset code auto-suggested and editable.
 - **Asset detail** `/assets/[id]` — full record, QR label (printable), maintenance history, edit form.
@@ -182,7 +182,6 @@ Public routes: none added — `/scan/asset/[id]` is authenticated.
 - Queries: `src/lib/db/queries/assets.ts` (asset CRUD with financial/physical projections, rooms CRUD,
   maintenance logs, events, dashboard aggregates).
 - Depreciation: `src/lib/assets/depreciation.ts` (pure).
-- Storage: `asset-images` Supabase bucket + small client upload helper.
 - API routes under `src/app/api/assets/…`, `…/rooms/…`, `…/maintenance/…`, plus scan actions.
 - UI: `src/app/(portal)/assets/…` pages + `src/components/assets/…` (area tabs, directory table,
   add-asset wizard, dashboard, rooms manager, quick-view card, QR label).
@@ -191,7 +190,6 @@ Public routes: none added — `/scan/asset/[id]` is authenticated.
 
 - `qrcode` — QR label generation.
 - `html5-qrcode` — camera scanning.
-- Supabase Storage bucket `asset-images` (new; app has no Storage usage today).
 - `@tanstack/react-table` and `recharts` already installed — reused for directory and charts.
 - CSV export built without a new dependency (string builder).
 
@@ -200,5 +198,7 @@ Public routes: none added — `/scan/asset/[id]` is authenticated.
 - Cron depreciation snapshots / point-in-time valuation history (computed on read instead).
 - E-signature and rate contracting (belongs to the separate B2B portal).
 - CRM / Salesforce sync.
+- **Supabase Storage image upload** — v1 uses a plain image URL field; direct upload (bucket
+  `asset-images` + client helper) is a deferred follow-up.
 - Bulk historical import can reuse the existing `BulkImportCard` CSV pattern but is a follow-up, not v1
   core.
