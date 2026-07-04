@@ -11,6 +11,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,6 +25,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 import { categoryLabel, statusLabel, type AssetStatus } from '@/lib/assets/labels'
 import type { AssetRow, AssetFinancialRow } from '@/lib/db/queries/assets'
@@ -78,6 +88,53 @@ interface AssetDetailProps {
 export function AssetDetail({ asset, logs, showFinancials, canEdit, canDelete }: AssetDetailProps) {
   const router = useRouter()
   const [isDeleting, setIsDeleting] = useState(false)
+  const [resolvingLog, setResolvingLog] = useState<MaintenanceLogRow | null>(null)
+  const [repairCostInput, setRepairCostInput] = useState('')
+  const [setActiveChecked, setSetActiveChecked] = useState(false)
+  const [isResolving, setIsResolving] = useState(false)
+
+  function openResolveDialog(log: MaintenanceLogRow) {
+    setRepairCostInput('')
+    setSetActiveChecked(asset.status === 'in_repair')
+    setResolvingLog(log)
+  }
+
+  function handleResolveDialogChange(open: boolean) {
+    if (!open && isResolving) return
+    if (!open) setResolvingLog(null)
+  }
+
+  async function handleResolve() {
+    if (!resolvingLog) return
+    setIsResolving(true)
+    try {
+      const trimmedCost = repairCostInput.trim()
+      const res = await fetch(
+        `/api/assets/${asset.id}/maintenance/${resolvingLog.id}/resolve`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...(trimmedCost ? { repairCost: trimmedCost } : {}),
+            setActive: setActiveChecked,
+          }),
+        },
+      )
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(
+          typeof body.error === 'string' ? body.error : 'Failed to resolve maintenance log',
+        )
+      }
+      toast.success('Maintenance log resolved')
+      setResolvingLog(null)
+      router.refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to resolve maintenance log')
+    } finally {
+      setIsResolving(false)
+    }
+  }
 
   async function handleDelete() {
     setIsDeleting(true)
@@ -258,12 +315,24 @@ export function AssetDetail({ asset, logs, showFinancials, canEdit, canDelete }:
                           </p>
                         )}
                       </div>
-                      <Badge
-                        variant="outline"
-                        className={RESOLUTION_BADGE_CLASSES[log.resolutionStatus]}
-                      >
-                        {log.resolutionStatus === 'resolved' ? 'Resolved' : 'Pending'}
-                      </Badge>
+                      <div className="flex shrink-0 flex-col items-end gap-2">
+                        <Badge
+                          variant="outline"
+                          className={RESOLUTION_BADGE_CLASSES[log.resolutionStatus]}
+                        >
+                          {log.resolutionStatus === 'resolved' ? 'Resolved' : 'Pending'}
+                        </Badge>
+                        {canEdit && log.resolutionStatus === 'pending' && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openResolveDialog(log)}
+                          >
+                            Resolve
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </li>
                 ))}
@@ -272,6 +341,54 @@ export function AssetDetail({ asset, logs, showFinancials, canEdit, canDelete }:
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={!!resolvingLog} onOpenChange={handleResolveDialogChange}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Resolve Maintenance Log</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {resolvingLog?.issueDescription}
+            </p>
+            {showFinancials && (
+              <div className="space-y-2">
+                <Label htmlFor="repair-cost">Repair cost (LKR)</Label>
+                <Input
+                  id="repair-cost"
+                  type="number"
+                  inputMode="decimal"
+                  placeholder="Optional"
+                  value={repairCostInput}
+                  onChange={(e) => setRepairCostInput(e.target.value)}
+                  disabled={isResolving}
+                />
+              </div>
+            )}
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={setActiveChecked}
+                onCheckedChange={(checked) => setSetActiveChecked(checked === true)}
+                disabled={isResolving}
+              />
+              Mark asset as Active
+            </label>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setResolvingLog(null)}
+              disabled={isResolving}
+            >
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleResolve} disabled={isResolving}>
+              {isResolving ? 'Resolving...' : 'Resolve'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
