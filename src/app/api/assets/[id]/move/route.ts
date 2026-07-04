@@ -34,5 +34,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   await updateAsset(id, { roomId })
   await logAssetEvent(id, profile.id, 'moved', room ? room.name : 'Unassigned')
 
-  return NextResponse.json({ room })
+  // Return only the fields the client needs; don't over-serialize the Room row.
+  return NextResponse.json({ room: room ? { id: room.id, name: room.name } : null })
 }
