@@ -1,6 +1,6 @@
 import { eq, desc } from 'drizzle-orm'
 import { db } from '..'
-import { maintenanceLogs, profiles } from '../schema'
+import { maintenanceLogs, profiles, type MaintenanceLog, type NewMaintenanceLog } from '../schema'
 import type { MaintenanceStatus } from '@/lib/assets/labels'
 
 export interface MaintenanceLogRow {
@@ -14,8 +14,28 @@ export interface MaintenanceLogRow {
   reporterName: string | null
 }
 
-// Plan 2 will extend this file with create/update/resolve mutations for
-// maintenance logs — kept intentionally minimal for now.
+export async function createMaintenanceLog(input: NewMaintenanceLog): Promise<MaintenanceLog> {
+  const [row] = await db.insert(maintenanceLogs).values(input).returning()
+  return row
+}
+
+export async function getMaintenanceLogById(id: string): Promise<MaintenanceLog | undefined> {
+  const [row] = await db.select().from(maintenanceLogs).where(eq(maintenanceLogs.id, id)).limit(1)
+  return row
+}
+
+export async function resolveMaintenanceLog(
+  logId: string,
+  resolvedBy: string,
+): Promise<MaintenanceLog | undefined> {
+  const [row] = await db
+    .update(maintenanceLogs)
+    .set({ resolutionStatus: 'resolved', resolvedBy, resolvedAt: new Date(), updatedAt: new Date() })
+    .where(eq(maintenanceLogs.id, logId))
+    .returning()
+  return row
+}
+
 export async function getMaintenanceLogsForAsset(assetId: string): Promise<MaintenanceLogRow[]> {
   return db
     .select({
