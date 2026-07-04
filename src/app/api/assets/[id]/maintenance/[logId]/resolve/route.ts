@@ -41,9 +41,9 @@ export async function POST(
   const body = await request.json().catch(() => null)
   const parsed = resolveSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
-  const { setActive } = parsed.data
+  const { setActive, repairCost } = parsed.data
 
-  await resolveMaintenanceLog(logId, profile.id)
+  await resolveMaintenanceLog(logId, profile.id, repairCost)
 
   if (setActive) {
     await updateAsset(id, { status: 'active' })

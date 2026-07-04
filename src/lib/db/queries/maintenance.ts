@@ -27,10 +27,18 @@ export async function getMaintenanceLogById(id: string): Promise<MaintenanceLog 
 export async function resolveMaintenanceLog(
   logId: string,
   resolvedBy: string,
+  repairCost?: string | null,
 ): Promise<MaintenanceLog | undefined> {
   const [row] = await db
     .update(maintenanceLogs)
-    .set({ resolutionStatus: 'resolved', resolvedBy, resolvedAt: new Date(), updatedAt: new Date() })
+    .set({
+      resolutionStatus: 'resolved',
+      resolvedBy,
+      resolvedAt: new Date(),
+      updatedAt: new Date(),
+      // Only overwrite the recorded repair cost when the resolver supplied one.
+      ...(repairCost != null ? { repairCost } : {}),
+    })
     .where(eq(maintenanceLogs.id, logId))
     .returning()
   return row
