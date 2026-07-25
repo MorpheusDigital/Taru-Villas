@@ -113,9 +113,24 @@ export function SopCompletion({ assignment, onBack }: SopCompletionProps) {
     return map
   }, [items])
 
+  // Section metadata (name + order) keyed by section id
+  const sectionInfo = useMemo(() => {
+    const map = new Map<string, { name: string; sortOrder: number }>()
+    for (const section of assignment.template.sections) {
+      map.set(section.id, { name: section.name, sortOrder: section.sortOrder })
+    }
+    return map
+  }, [assignment.template.sections])
+
   // Ungrouped items (null sectionId)
   const ungroupedItems = sectionMap.get(null) ?? []
-  const sectionedEntries = [...sectionMap.entries()].filter(([k]) => k !== null)
+  const sectionedEntries = [...sectionMap.entries()]
+    .filter(([k]) => k !== null)
+    .sort(
+      ([a], [b]) =>
+        (sectionInfo.get(a as string)?.sortOrder ?? 0) -
+        (sectionInfo.get(b as string)?.sortOrder ?? 0)
+    )
 
   if (loading) {
     return (
@@ -192,13 +207,11 @@ export function SopCompletion({ assignment, onBack }: SopCompletionProps) {
       )}
 
       {sectionedEntries.map(([sectionId, sectionItems]) => {
-        // We don't have section names in the flat items list,
-        // so we'll use a generic heading. The section name would
-        // need to be passed through the template data.
+        const sectionName = sectionInfo.get(sectionId as string)?.name ?? 'Section'
         return (
           <Card key={sectionId}>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Section</CardTitle>
+              <CardTitle className="text-base">{sectionName}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-1">

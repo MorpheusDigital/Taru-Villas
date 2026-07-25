@@ -36,7 +36,7 @@ export type SopCompletionWithItems = SopCompletion & {
 }
 
 export type SopAssignmentForUser = SopAssignment & {
-  template: SopTemplate & { items: SopItem[] }
+  template: SopTemplate & { items: SopItem[]; sections: SopSection[] }
   property: Property
   category: { id: string; name: string; sortOrder: number } | null
   currentCompletion: SopCompletionWithItems | null

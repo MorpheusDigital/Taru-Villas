@@ -334,6 +334,20 @@ export async function getAssignmentsForUser(
     itemsByTemplate.set(item.templateId, list)
   }
 
+  // Fetch sections so the completion view can render real section names
+  const allSections = await db
+    .select()
+    .from(sopSections)
+    .where(inArray(sopSections.templateId, templateIds))
+    .orderBy(asc(sopSections.sortOrder), asc(sopSections.createdAt))
+
+  const sectionsByTemplate = new Map<string, SopSection[]>()
+  for (const section of allSections) {
+    const list = sectionsByTemplate.get(section.templateId) ?? []
+    list.push(section)
+    sectionsByTemplate.set(section.templateId, list)
+  }
+
   // Get current completions for each assignment
   const assignmentIds = rows.map((r) => r.assignment.id)
   const dueDates = rows.map((r) =>
@@ -376,6 +390,7 @@ export async function getAssignmentsForUser(
       template: {
         ...r.template,
         items: itemsByTemplate.get(r.template.id) ?? [],
+        sections: sectionsByTemplate.get(r.template.id) ?? [],
       },
       property: r.property,
       category: r.category
