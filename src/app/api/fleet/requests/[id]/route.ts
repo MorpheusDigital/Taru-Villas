@@ -53,17 +53,66 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       )
     }
 
+    const data = parsed.data
+
+    // Fix 1: date-range coherence — the same rule createSchema's `.refine`
+    // applies at creation (endDate >= startDate), re-checked against the
+    // EFFECTIVE dates: the incoming value where the caller supplied one,
+    // else the value already on the row. A PATCH touching only `endDate`
+    // must still be checked against the stored `startDate` (and vice
+    // versa), or `{ endDate: '2026-08-01' }` on a 20–22 Aug request would
+    // silently invert the window — the engine's horizon filter reads an
+    // inverted window as "already passed" and stealth-stalls it
+    // unassignable while the requester believes the trip is booked.
+    const effectiveStartDate = data.startDate ?? existing.startDate
+    const effectiveEndDate = data.endDate ?? existing.endDate
+    if (effectiveEndDate < effectiveStartDate) {
+      return NextResponse.json(
+        { error: 'End date cannot be before the start date' },
+        { status: 400 },
+      )
+    }
+
+    // Fix 2: requestType coherence — the same rules POST applies (createSchema's
+    // refine requiring the field for this request's type, plus the ternaries
+    // in POST's createRequest call that null out the field that doesn't
+    // belong). requestType itself isn't editable via PATCH, so it's fixed at
+    // existing.requestType. `hasOwnProperty` (not `??`) distinguishes "caller
+    // sent an explicit null to clear this field" from "caller didn't touch
+    // this field" — both fields are nullable, so `??` would treat an
+    // explicit clear the same as "not provided" and silently keep the old
+    // value, defeating the very check below.
+    const hasTargetPropertyId = Object.prototype.hasOwnProperty.call(data, 'targetPropertyId')
+    const hasDestinationText = Object.prototype.hasOwnProperty.call(data, 'destinationText')
+    const effectiveTargetPropertyId = hasTargetPropertyId ? data.targetPropertyId : existing.targetPropertyId
+    const effectiveDestinationText = hasDestinationText ? data.destinationText : existing.destinationText
+
+    if (existing.requestType === 'visit' && !effectiveTargetPropertyId) {
+      return NextResponse.json({ error: 'A visit needs a target property' }, { status: 400 })
+    }
+    if (existing.requestType === 'standalone' && !effectiveDestinationText) {
+      return NextResponse.json({ error: 'A standalone booking needs a destination' }, { status: 400 })
+    }
+
     // Whitelist the editable fields explicitly rather than spreading
     // parsed.data straight through. updateRequest() takes a bare
     // Partial<NewFleetRequest> and will write ANY column it is handed —
     // including orgId, status, and requestedBy. Today's schema doesn't list
     // those fields, so nothing leaks, but that safety must live here in the
     // route, not merely in the current shape of updateSchema.
-    const data = parsed.data
+    //
+    // targetPropertyId/destinationText are forced to the coherent value for
+    // this row's fixed requestType (null on the side that doesn't apply),
+    // exactly like POST's own ternaries — not just left as whatever the
+    // caller sent. Without this, `{ targetPropertyId: '<uuid>' }` on a
+    // standalone request would pass the required-field check above (its
+    // destinationText is untouched and still present) yet still smuggle a
+    // property onto a request whose type says it shouldn't have one — the
+    // "mirror case" that pools/dispatches against the wrong location.
     const updatePayload: Partial<NewFleetRequest> = {
-      targetPropertyId: data.targetPropertyId,
+      targetPropertyId: existing.requestType === 'visit' ? effectiveTargetPropertyId : null,
       originText: data.originText,
-      destinationText: data.destinationText,
+      destinationText: existing.requestType === 'standalone' ? effectiveDestinationText : null,
       startDate: data.startDate,
       endDate: data.endDate,
       paxCount: data.paxCount,
@@ -120,6 +169,26 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
     const isOwner = existing.requestedBy === profile.id
     const isFleetAdmin = profile.isFleetAdmin || profile.role === 'admin'
     if (!isOwner && !isFleetAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+    // Fix 3: a completed trip already happened — cancelling it after the
+    // fact would flip a real trip to `cancelled` with no admin involved and
+    // no audit trail, and it would drop out of completed-trip reporting.
+    // Unlike `dispatched` below, this has no admin override: it isn't a
+    // permission gap, it's a state this endpoint must never be able to
+    // reverse.
+    if (existing.status === 'completed') {
+      return NextResponse.json(
+        { error: 'This trip has already been completed and cannot be cancelled.' },
+        { status: 409 },
+      )
+    }
+
+    // Re-cancelling an already-cancelled request used to succeed silently
+    // (and bump updatedAt), which reads as "just cancelled it" when nothing
+    // changed. Fail with 409 instead.
+    if (existing.status === 'cancelled') {
+      return NextResponse.json({ error: 'This request is already cancelled.' }, { status: 409 })
+    }
 
     // A dispatched request can only be cancelled by a fleet admin — the
     // vehicle is already committed and the driver has been notified.
