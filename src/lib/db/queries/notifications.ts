@@ -11,6 +11,19 @@ export interface SaveSubscriptionInput {
   userAgent?: string | null
 }
 
+/**
+ * Endpoints are per-browser-profile, not per-person: the same endpoint can
+ * be re-registered by a different owner (a shared fleet phone handed to a
+ * new driver, or a driver opening their link in a browser profile someone
+ * else used). The `set` clause below must therefore transfer ownership —
+ * updating `profileId`/`driverId`, not just the keys — or a stale row keeps
+ * pointing at the previous owner and `getSubscriptionsForDriver` /
+ * `getSubscriptionsForProfile` silently deliver the wrong person's trip
+ * details. Both columns are written from `input` together (not merged with
+ * the existing row) so the table's `num_nonnulls(profile_id, driver_id) = 1`
+ * CHECK constraint stays satisfied as long as the caller supplies exactly
+ * one owner, which is `SaveSubscriptionInput`'s contract.
+ */
 export async function saveSubscription(input: SaveSubscriptionInput) {
   const [row] = await db
     .insert(pushSubscriptions)
@@ -25,6 +38,8 @@ export async function saveSubscription(input: SaveSubscriptionInput) {
     .onConflictDoUpdate({
       target: pushSubscriptions.endpoint,
       set: {
+        profileId: input.profileId ?? null,
+        driverId: input.driverId ?? null,
         p256dh: input.p256dh,
         auth: input.auth,
         lastSeenAt: new Date(),
