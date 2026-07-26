@@ -28,10 +28,16 @@ const bodySchema = z.discriminatedUnion('action', [
  * markStopArrived, completeDispatch) — those queries scope their own WHERE
  * clause by driverId, so a dispatch/stop that doesn't belong to this driver
  * simply doesn't match and the query returns `undefined`, which this route
- * treats as 404. There is no second, divergent status check here: the Task 7
- * query functions already enforce approved/in_progress-only transitions and
- * ownership, and duplicating that logic here would only risk it drifting out
- * of sync with them.
+ * treats as 404. There is no second, divergent status check here: each Task 7
+ * query function enforces its own guard, and duplicating any of them here
+ * would only risk this route drifting out of sync with them. Precisely, per
+ * function: `markDispatchStarted` and `completeDispatch` both scope by
+ * `driverId` AND require `status IN (approved, in_progress)`. `markStopArrived`
+ * scopes by `driverId` via the same dispatch-ids subquery pattern and also
+ * requires `status IN (approved, in_progress)` (see its docstring in
+ * `queries/dispatches.ts` for why `approved` is included, not just
+ * `in_progress`) — so all three now reject a dispatch/stop that either isn't
+ * owned by this driver or has already left the approved/in_progress window.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
@@ -59,16 +65,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ ok: true })
     }
 
-    // action === 'complete'. Fetched before the write purely to get the stop
-    // list for the notify loop below — it is never returned in the HTTP
-    // response and never used to authorize anything. If `dispatchId` belongs
-    // to another driver, `full` may still resolve here, but completeDispatch
-    // (scoped by driverId) then fails to match and we return 404 before this
-    // data is touched again, so nothing about another driver's trip ever
-    // reaches the response or the notify loop.
-    const full = await getDispatchWithStops(body.dispatchId)
+    // action === 'complete'. Ownership is proven FIRST, by completeDispatch's
+    // own driverId-scoped update, before any dispatch_stops row is read.
+    // getDispatchWithStops takes a bare id with no driver filter, so it is
+    // fetched only after `completed` is truthy — completeDispatch never
+    // mutates dispatch_stops itself, so reading `full` afterwards returns the
+    // identical stop list with the same driverId guarantee that already
+    // gated the write. This way a foreign-org/foreign-driver dispatchId's
+    // stops are never read into memory at all on the 404 path, rather than
+    // being read-then-discarded.
     const completed = await completeDispatch(body.dispatchId, driver.id)
     if (!completed) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    const full = await getDispatchWithStops(body.dispatchId)
 
     // Notifications are best-effort and run AFTER completeDispatch has
     // already committed. A driver on a bad connection tapping "Complete"

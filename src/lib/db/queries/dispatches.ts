@@ -558,6 +558,15 @@ export async function markDispatchStarted(id: string, driverId: string) {
   return updated
 }
 
+/**
+ * The dispatch-ids subquery also requires `status IN (approved, in_progress)`
+ * — the same set `markDispatchStarted`/`completeDispatch` transition between
+ * — so a stop on a driver's own completed or cancelled dispatch can no
+ * longer have its `arrivedAt` silently overwritten after the fact. `approved`
+ * is included (not just `in_progress`) because a driver may legitimately mark
+ * arrival at a stop before tapping "start trip"; excluding it would break
+ * that ordering, not just close a corner case.
+ */
 export async function markStopArrived(stopId: string, driverId: string) {
   const [updated] = await db
     .update(dispatchStops)
@@ -567,7 +576,15 @@ export async function markStopArrived(stopId: string, driverId: string) {
         eq(dispatchStops.id, stopId),
         inArray(
           dispatchStops.dispatchId,
-          db.select({ id: dispatches.id }).from(dispatches).where(eq(dispatches.driverId, driverId)),
+          db
+            .select({ id: dispatches.id })
+            .from(dispatches)
+            .where(
+              and(
+                eq(dispatches.driverId, driverId),
+                inArray(dispatches.status, ['approved', 'in_progress']),
+              ),
+            ),
         ),
       ),
     )

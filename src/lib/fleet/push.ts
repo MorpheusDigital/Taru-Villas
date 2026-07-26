@@ -11,6 +11,21 @@ let configured = false
 let configureError: string | null = null
 
 /**
+ * `web-push`'s `sendNotification` has no default timeout — an unresponsive
+ * endpoint (a token holder registered one deliberately, or a push service is
+ * just slow) would otherwise hang the `await` inside the loop below
+ * indefinitely. Callers of `notify()` include admin actions that block on it
+ * (dispatch approval), so one bad row must not stall every other
+ * subscription behind it in the loop, nor the caller's HTTP response. This
+ * is a socket timeout per the `web-push` types (`@types/web-push`): on
+ * expiry the library destroys the request and rejects the promise with an
+ * error, which the existing per-subscription try/catch below already
+ * catches like any other delivery failure — it does not need its own catch
+ * to preserve notify()'s never-throws guarantee.
+ */
+const PUSH_SEND_TIMEOUT_MS = 5000
+
+/**
  * `webpush.setVapidDetails` throws synchronously when the keys are present
  * but malformed (e.g. a subject missing a URL scheme, a mistyped key) — an
  * ops mistake, not a code bug, and a realistic one since it happens by
@@ -83,6 +98,7 @@ export async function notify(input: NotifyInput): Promise<void> {
           await webpush.sendNotification(
             { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
             payload,
+            { timeout: PUSH_SEND_TIMEOUT_MS },
           )
           sentAt = new Date()
         } catch (e) {
