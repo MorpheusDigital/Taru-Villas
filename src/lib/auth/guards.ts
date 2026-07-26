@@ -38,6 +38,9 @@ async function getDevBypassProfile(): Promise<ProfileWithAssignments> {
     role: 'admin',
     avatarUrl: null,
     isActive: true,
+    isFleetAdmin: true,
+    canBookFleet: true,
+    canUseRestrictedVehicles: true,
     createdAt: new Date(),
     updatedAt: new Date(),
     assignments: props.map((p) => ({

@@ -167,6 +167,9 @@ export const profiles = pgTable('profiles', {
   role: userRoleEnum('role').notNull(),
   avatarUrl: text('avatar_url'),
   isActive: boolean('is_active').default(true).notNull(),
+  isFleetAdmin: boolean('is_fleet_admin').default(false).notNull(),
+  canBookFleet: boolean('can_book_fleet').default(false).notNull(),
+  canUseRestrictedVehicles: boolean('can_use_restricted_vehicles').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
@@ -1496,3 +1499,207 @@ export type MaintenanceLog = typeof maintenanceLogs.$inferSelect
 export type NewMaintenanceLog = typeof maintenanceLogs.$inferInsert
 export type AssetEvent = typeof assetEvents.$inferSelect
 export type NewAssetEvent = typeof assetEvents.$inferInsert
+
+// ---------------------------------------------------------------------------
+// Fleet & Visit Command
+// ---------------------------------------------------------------------------
+export const fleetRequestTypeEnum = pgEnum('fleet_request_type', ['visit', 'standalone'])
+export const fleetRequestStatusEnum = pgEnum('fleet_request_status', [
+  'pending', 'queued', 'dispatched', 'completed', 'cancelled',
+])
+export const dispatchStatusEnum = pgEnum('dispatch_status', [
+  'draft', 'approved', 'in_progress', 'completed', 'cancelled',
+])
+export const vehicleStatusEnum = pgEnum('vehicle_status', ['active', 'maintenance', 'retired'])
+export const driverLanguageEnum = pgEnum('driver_language', ['en', 'si', 'ta'])
+
+export const vehicles = pgTable('vehicles', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id),
+  name: varchar('name', { length: 255 }).notNull(),
+  registrationNo: varchar('registration_no', { length: 50 }),
+  maxPassengers: integer('max_passengers').notNull(),
+  cargoCapable: boolean('cargo_capable').default(false).notNull(),
+  isRestricted: boolean('is_restricted').default(false).notNull(),
+  status: vehicleStatusEnum('status').default('active').notNull(),
+  currentLocationPropertyId: uuid('current_location_property_id')
+    .references(() => properties.id, { onDelete: 'set null' }),
+  assetId: uuid('asset_id').references(() => assets.id, { onDelete: 'set null' }),
+  sortOrder: integer('sort_order').default(0).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [unique('vehicles_org_name_unique').on(t.orgId, t.name)])
+
+export const drivers = pgTable('drivers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id),
+  fullName: text('full_name').notNull(),
+  phone: varchar('phone', { length: 50 }),
+  preferredLanguage: driverLanguageEnum('preferred_language').default('en').notNull(),
+  accessToken: varchar('access_token', { length: 32 }).notNull().unique(),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const driverVehicles = pgTable('driver_vehicles', {
+  driverId: uuid('driver_id').notNull().references(() => drivers.id, { onDelete: 'cascade' }),
+  vehicleId: uuid('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'cascade' }),
+}, (t) => [unique('driver_vehicles_pk').on(t.driverId, t.vehicleId)])
+
+export const propertyDistances = pgTable('property_distances', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id),
+  fromPropertyId: uuid('from_property_id').references(() => properties.id, { onDelete: 'cascade' }),
+  toPropertyId: uuid('to_property_id').references(() => properties.id, { onDelete: 'cascade' }),
+  distanceKm: numeric('distance_km', { precision: 6, scale: 1 }).notNull(),
+  driveMinutes: integer('drive_minutes'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const fleetSettings = pgTable('fleet_settings', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orgId: uuid('org_id').notNull().unique().references(() => organizations.id),
+  poolingThresholdKm: numeric('pooling_threshold_km', { precision: 6, scale: 1 }).default('40.0').notNull(),
+  planningHorizonDays: integer('planning_horizon_days').default(14).notNull(),
+  engineEnabled: boolean('engine_enabled').default(true).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const fleetRequests = pgTable('fleet_requests', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id),
+  requestType: fleetRequestTypeEnum('request_type').notNull(),
+  requestedBy: uuid('requested_by').notNull().references(() => profiles.id),
+  targetPropertyId: uuid('target_property_id').references(() => properties.id, { onDelete: 'set null' }),
+  originText: text('origin_text'),
+  destinationText: text('destination_text'),
+  startDate: date('start_date').notNull(),
+  endDate: date('end_date').notNull(),
+  paxCount: integer('pax_count').default(1).notNull(),
+  cargoRequired: boolean('cargo_required').default(false).notNull(),
+  purpose: text('purpose'),
+  notes: text('notes'),
+  status: fleetRequestStatusEnum('status').default('pending').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const dispatches = pgTable('dispatches', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id),
+  vehicleId: uuid('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'restrict' }),
+  driverId: uuid('driver_id').notNull().references(() => drivers.id, { onDelete: 'restrict' }),
+  startDate: date('start_date').notNull(),
+  endDate: date('end_date').notNull(),
+  status: dispatchStatusEnum('status').default('draft').notNull(),
+  generatedBy: varchar('generated_by', { length: 16 }).default('engine').notNull(),
+  approvedBy: uuid('approved_by').references(() => profiles.id, { onDelete: 'set null' }),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const dispatchStops = pgTable('dispatch_stops', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  dispatchId: uuid('dispatch_id').notNull().references(() => dispatches.id, { onDelete: 'cascade' }),
+  requestId: uuid('request_id').references(() => fleetRequests.id, { onDelete: 'set null' }),
+  propertyId: uuid('property_id').references(() => properties.id, { onDelete: 'set null' }),
+  label: text('label'),
+  sortOrder: integer('sort_order').default(0).notNull(),
+  arrivedAt: timestamp('arrived_at', { withTimezone: true }),
+})
+
+export const pushSubscriptions = pgTable('push_subscriptions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  profileId: uuid('profile_id').references(() => profiles.id, { onDelete: 'cascade' }),
+  driverId: uuid('driver_id').references(() => drivers.id, { onDelete: 'cascade' }),
+  endpoint: text('endpoint').notNull().unique(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const notifications = pgTable('notifications', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id),
+  profileId: uuid('profile_id').references(() => profiles.id, { onDelete: 'cascade' }),
+  driverId: uuid('driver_id').references(() => drivers.id, { onDelete: 'cascade' }),
+  type: varchar('type', { length: 50 }).notNull(),
+  title: text('title').notNull(),
+  body: text('body'),
+  linkUrl: text('link_url'),
+  channel: varchar('channel', { length: 16 }).default('in_app').notNull(),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  readAt: timestamp('read_at', { withTimezone: true }),
+  deliveryError: text('delivery_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const vehiclesRelations = relations(vehicles, ({ one, many }) => ({
+  organization: one(organizations, { fields: [vehicles.orgId], references: [organizations.id] }),
+  currentLocation: one(properties, {
+    fields: [vehicles.currentLocationPropertyId],
+    references: [properties.id],
+  }),
+  driverLinks: many(driverVehicles),
+  dispatches: many(dispatches),
+}))
+
+export const driversRelations = relations(drivers, ({ one, many }) => ({
+  organization: one(organizations, { fields: [drivers.orgId], references: [organizations.id] }),
+  vehicleLinks: many(driverVehicles),
+  dispatches: many(dispatches),
+}))
+
+export const driverVehiclesRelations = relations(driverVehicles, ({ one }) => ({
+  driver: one(drivers, { fields: [driverVehicles.driverId], references: [drivers.id] }),
+  vehicle: one(vehicles, { fields: [driverVehicles.vehicleId], references: [vehicles.id] }),
+}))
+
+export const fleetRequestsRelations = relations(fleetRequests, ({ one, many }) => ({
+  organization: one(organizations, { fields: [fleetRequests.orgId], references: [organizations.id] }),
+  requester: one(profiles, { fields: [fleetRequests.requestedBy], references: [profiles.id] }),
+  targetProperty: one(properties, {
+    fields: [fleetRequests.targetPropertyId],
+    references: [properties.id],
+  }),
+  stops: many(dispatchStops),
+}))
+
+export const dispatchesRelations = relations(dispatches, ({ one, many }) => ({
+  organization: one(organizations, { fields: [dispatches.orgId], references: [organizations.id] }),
+  vehicle: one(vehicles, { fields: [dispatches.vehicleId], references: [vehicles.id] }),
+  driver: one(drivers, { fields: [dispatches.driverId], references: [drivers.id] }),
+  approver: one(profiles, { fields: [dispatches.approvedBy], references: [profiles.id] }),
+  stops: many(dispatchStops),
+}))
+
+export const dispatchStopsRelations = relations(dispatchStops, ({ one }) => ({
+  dispatch: one(dispatches, { fields: [dispatchStops.dispatchId], references: [dispatches.id] }),
+  request: one(fleetRequests, { fields: [dispatchStops.requestId], references: [fleetRequests.id] }),
+  property: one(properties, { fields: [dispatchStops.propertyId], references: [properties.id] }),
+}))
+
+export type Vehicle = typeof vehicles.$inferSelect
+export type NewVehicle = typeof vehicles.$inferInsert
+export type Driver = typeof drivers.$inferSelect
+export type NewDriver = typeof drivers.$inferInsert
+export type PropertyDistance = typeof propertyDistances.$inferSelect
+export type FleetSetting = typeof fleetSettings.$inferSelect
+export type FleetRequest = typeof fleetRequests.$inferSelect
+export type NewFleetRequest = typeof fleetRequests.$inferInsert
+export type Dispatch = typeof dispatches.$inferSelect
+export type NewDispatch = typeof dispatches.$inferInsert
+export type DispatchStop = typeof dispatchStops.$inferSelect
+export type NewDispatchStop = typeof dispatchStops.$inferInsert
+export type PushSubscription = typeof pushSubscriptions.$inferSelect
+export type Notification = typeof notifications.$inferSelect
