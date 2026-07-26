@@ -1349,19 +1349,32 @@ describe('planDispatches', () => {
     expect(r.unassignable).toHaveLength(1)
   })
 
-  it('spreads work to the least-loaded eligible driver', () => {
+  // Both drivers are licensed for the van and neither is busy in the request
+  // window, so licence and availability cannot decide it — only load can.
+  // The second case is the one that matters: 'd-nimal' sorts first
+  // alphabetically, so if load were ignored it would win by the id tiebreak.
+  it('gives the trip to the less-loaded driver when Sunil is busier', () => {
     const r = planDispatches(input({
-      vehicles: [van, { ...car1, isRestricted: false }],
-      requests: [
-        request({ id: 'r1', targetPropertyId: 'p1', paxCount: 2 }),
-        request({ id: 'r2', targetPropertyId: 'p3', paxCount: 2 }),
-      ],
+      vehicles: [van],
+      requests: [request({ id: 'r1', paxCount: 2 })],
       existingDispatches: [
         { id: 'x1', vehicleId: 'v-lorry', driverId: 'd-sunil', startDate: '2026-08-20', endDate: '2026-08-20' },
       ],
     }))
-    // Sunil already has one trip, so the first draft should go to Nimal.
+    expect(r.drafts).toHaveLength(1)
     expect(r.drafts[0].driverId).toBe('d-nimal')
+  })
+
+  it('gives the trip to the less-loaded driver when Nimal is busier', () => {
+    const r = planDispatches(input({
+      vehicles: [van],
+      requests: [request({ id: 'r1', paxCount: 2 })],
+      existingDispatches: [
+        { id: 'x1', vehicleId: 'v-car1', driverId: 'd-nimal', startDate: '2026-08-20', endDate: '2026-08-20' },
+      ],
+    }))
+    expect(r.drafts).toHaveLength(1)
+    expect(r.drafts[0].driverId).toBe('d-sunil')
   })
 
   it('flags requests whose window has already passed', () => {
@@ -1637,7 +1650,7 @@ export function planDispatches(input: EngineInput): EngineResult {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run src/lib/fleet/engine.test.ts`
-Expected: PASS, 17 tests.
+Expected: PASS, 18 tests.
 
 - [ ] **Step 5: Run the whole suite and typecheck**
 
@@ -3590,11 +3603,12 @@ import { z } from 'zod'
 import { getDriverByToken } from '@/lib/db/queries/fleet'
 import {
   completeDispatch,
+  getDispatchWithStops,
+  getRequestById,
   markDispatchStarted,
   markStopArrived,
 } from '@/lib/db/queries/dispatches'
 import { notify } from '@/lib/fleet/push'
-import { getDispatchWithStops, getRequestById } from '@/lib/db/queries/dispatches'
 
 export const dynamic = 'force-dynamic'
 
