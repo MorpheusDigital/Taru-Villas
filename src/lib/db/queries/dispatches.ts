@@ -244,7 +244,19 @@ export async function replaceDraftDispatches(orgId: string, result: EngineResult
           .where(and(inArray(fleetRequests.id, freedIds), eq(fleetRequests.status, 'queued')))
           .returning()
       }
-      await tx.delete(dispatches).where(inArray(dispatches.id, ids)).returning()
+      // Re-apply isDiscardableEngineDraft() at DELETE time, not just at the
+      // SELECT above: under READ COMMITTED, a concurrent approveDispatch()
+      // that commits in the gap between the SELECT and this DELETE would
+      // otherwise still get deleted, since `ids` was captured before that
+      // commit. That deletes a dispatch whose requests were just flipped to
+      // 'dispatched' — dispatch_stops cascades away with it, and those
+      // requests then strand permanently (loadEngineInput only loads
+      // pending/queued). Re-checking here means the DELETE's own WHERE
+      // clause sees the post-commit 'approved' status and skips that row.
+      await tx
+        .delete(dispatches)
+        .where(and(inArray(dispatches.id, ids), isDiscardableEngineDraft()))
+        .returning()
     }
 
     const created: string[] = []

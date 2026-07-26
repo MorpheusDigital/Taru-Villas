@@ -1,8 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { and, eq, inArray, ne } from 'drizzle-orm'
 import { getProfile } from '@/lib/auth/guards'
 import { createManualDispatch, listDispatches } from '@/lib/db/queries/dispatches'
 import { listDrivers, listVehicles } from '@/lib/db/queries/fleet'
+import { validateVehicleForCluster } from '@/lib/fleet/constraints'
+import { db } from '@/lib/db'
+import { fleetRequests, profiles } from '@/lib/db/schema'
+
+/**
+ * The same set of requests createManualDispatch will actually attach — org
+ * match, not cancelled — loaded here with the requester's
+ * canUseRestrictedVehicles flag so the chosen vehicle can be checked against
+ * the REAL attached load, not just the caller-supplied requestIds array.
+ */
+async function loadAttachedRequests(orgId: string, requestIds: string[]) {
+  if (requestIds.length === 0) return []
+  return db
+    .select({
+      id: fleetRequests.id,
+      paxCount: fleetRequests.paxCount,
+      cargoRequired: fleetRequests.cargoRequired,
+      requesterCanUseRestricted: profiles.canUseRestrictedVehicles,
+    })
+    .from(fleetRequests)
+    .leftJoin(profiles, eq(fleetRequests.requestedBy, profiles.id))
+    .where(
+      and(
+        inArray(fleetRequests.id, requestIds),
+        eq(fleetRequests.orgId, orgId),
+        ne(fleetRequests.status, 'cancelled'),
+      ),
+    )
+}
 
 const createSchema = z.object({
   vehicleId: z.string().uuid(),
@@ -95,6 +125,24 @@ export async function POST(request: NextRequest) {
         { error: `${driver.fullName} is not licensed for ${vehicle.name}.` },
         { status: 400 },
       )
+    }
+
+    // Same class as the org/active/licence checks above: the manual path
+    // must also match eligibleVehiclesFor's remaining rules (constraints.ts)
+    // — total attached passengers vs seats, a cargo request on a non-cargo
+    // vehicle, and a restricted vehicle with no cleared requester aboard —
+    // or hand-assignment stays the way to put five people on a one-seat
+    // lorry. validateVehicleForCluster is the exact function
+    // eligibleVehiclesFor uses internally, so the engine and this route
+    // cannot drift apart on what "eligible" means.
+    const attachedRequests = await loadAttachedRequests(profile.orgId, parsed.data.requestIds)
+    const clusterCheck = validateVehicleForCluster(vehicle, {
+      totalPax: attachedRequests.reduce((sum, r) => sum + r.paxCount, 0),
+      cargoRequired: attachedRequests.some((r) => r.cargoRequired),
+      allowsRestricted: attachedRequests.some((r) => r.requesterCanUseRestricted),
+    })
+    if (!clusterCheck.ok) {
+      return NextResponse.json({ error: clusterCheck.error }, { status: 400 })
     }
 
     const dispatch = await createManualDispatch(profile.orgId, {

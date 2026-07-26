@@ -66,6 +66,44 @@ export function validateFleetRequest(
   return { ok: true }
 }
 
+/** The subset of ClusterSpec that a single already-chosen vehicle can be checked against. */
+export type VehicleClusterRequirements = Pick<
+  ClusterSpec,
+  'totalPax' | 'cargoRequired' | 'allowsRestricted'
+>
+
+/**
+ * Checks one already-chosen vehicle against a cluster's cargo/capacity/
+ * restricted-access requirements — the same three rules eligibleVehiclesFor
+ * applies when the engine is picking among candidates, factored out so a
+ * caller that has already picked its vehicle (the manual-dispatch route) and
+ * the engine's own candidate filter share one implementation and cannot
+ * drift apart. Availability (already booked in the window) is deliberately
+ * NOT checked here — that is eligibleVehiclesFor's concern when choosing
+ * among several candidates, not a fixed property of the vehicle itself.
+ */
+export function validateVehicleForCluster(
+  vehicle: EngineVehicle,
+  requirements: VehicleClusterRequirements,
+): ValidationResult {
+  if (requirements.cargoRequired && !vehicle.cargoCapable) {
+    return { ok: false, error: `${vehicle.name} is not cargo-capable.` }
+  }
+  if (vehicle.maxPassengers < requirements.totalPax) {
+    return {
+      ok: false,
+      error: `${vehicle.name} seats ${vehicle.maxPassengers}, but ${requirements.totalPax} passengers are attached.`,
+    }
+  }
+  if (vehicle.isRestricted && !requirements.allowsRestricted) {
+    return {
+      ok: false,
+      error: `${vehicle.name} is a restricted vehicle and none of the attached requesters are cleared to use it.`,
+    }
+  }
+  return { ok: true }
+}
+
 /**
  * Vehicles that could serve this cluster. Busy ids are supplied by the caller,
  * which knows about both already-approved dispatches and drafts planned
@@ -78,10 +116,7 @@ export function eligibleVehiclesFor(
 ): EngineVehicle[] {
   return usable(vehicles).filter((v) => {
     if (busyVehicleIds.has(v.id)) return false
-    if (cluster.cargoRequired && !v.cargoCapable) return false
-    if (v.maxPassengers < cluster.totalPax) return false
-    if (v.isRestricted && !cluster.allowsRestricted) return false
-    return true
+    return validateVehicleForCluster(v, cluster).ok
   })
 }
 

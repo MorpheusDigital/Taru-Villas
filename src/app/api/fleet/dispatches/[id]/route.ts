@@ -64,7 +64,12 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       for (const stop of existing.stops) {
         if (!stop.requestId) continue
         const req = await getRequestById(stop.requestId)
-        if (!req || notified.has(req.requestedBy)) continue
+        // approveDispatch deliberately refuses to flip a cancelled request to
+        // 'dispatched' (its fleetRequests update is guarded by
+        // ne(status, 'cancelled')) — the notify loop must honour the same
+        // rule, or a requester who cancelled still gets "Your trip is
+        // confirmed" for a trip that is still `cancelled` in the database.
+        if (!req || req.status === 'cancelled' || notified.has(req.requestedBy)) continue
         notified.add(req.requestedBy)
         await notify({
           orgId: profile.orgId,
