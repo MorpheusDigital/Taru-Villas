@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getProfile } from '@/lib/auth/guards'
 import { cancelRequest, getRequestById, updateRequest } from '@/lib/db/queries/dispatches'
+import { listVehicles } from '@/lib/db/queries/fleet'
+import { validateFleetRequest } from '@/lib/fleet/constraints'
 import type { NewFleetRequest } from '@/lib/db/schema'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -69,6 +71,32 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       purpose: data.purpose,
       notes: data.notes,
     }
+
+    // Re-run the cargo/capacity rule (§5.1) against the EFFECTIVE values —
+    // the incoming field where the caller supplied one, else the value
+    // already on the row. A PATCH touching only paxCount must still be
+    // checked against the request's stored cargoRequired, and vice versa,
+    // or `{ paxCount: 5 }` on an existing cargoRequired: true request would
+    // sail through unchecked. This must run — and fail closed — before
+    // updateRequest() so a rejected edit never leaves a partial write.
+    const effectiveCargoRequired = data.cargoRequired ?? existing.cargoRequired
+    const effectivePaxCount = data.paxCount ?? existing.paxCount
+
+    const fleet = await listVehicles(profile.orgId)
+    const check = validateFleetRequest(
+      { cargoRequired: effectiveCargoRequired, paxCount: effectivePaxCount },
+      fleet.map((v) => ({
+        id: v.id,
+        name: v.name,
+        maxPassengers: v.maxPassengers,
+        cargoCapable: v.cargoCapable,
+        isRestricted: v.isRestricted,
+        status: v.status,
+        currentLocationPropertyId: v.currentLocationPropertyId,
+        sortOrder: v.sortOrder,
+      })),
+    )
+    if (!check.ok) return NextResponse.json({ error: check.error }, { status: 400 })
 
     return NextResponse.json(await updateRequest(id, updatePayload))
   } catch (error) {
