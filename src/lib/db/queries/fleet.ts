@@ -124,7 +124,7 @@ export async function deleteDriver(id: string) {
 /** Replaces the driver's licence set wholesale. */
 export async function setDriverVehicles(driverId: string, vehicleIds: string[]) {
   return db.transaction(async (tx) => {
-    await tx.delete(driverVehicles).where(eq(driverVehicles.driverId, driverId))
+    await tx.delete(driverVehicles).where(eq(driverVehicles.driverId, driverId)).returning()
     if (vehicleIds.length === 0) return []
     return tx
       .insert(driverVehicles)
