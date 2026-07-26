@@ -70,8 +70,17 @@ export async function POST(request: NextRequest) {
     if (!vehicle) {
       return NextResponse.json({ error: 'Unknown vehicle.' }, { status: 400 })
     }
-    if (vehicle.status === 'retired') {
-      return NextResponse.json({ error: 'This vehicle is retired and cannot be dispatched.' }, { status: 400 })
+    // Must match the engine's own eligibility filter (constraints.ts: usable()
+    // only ever plans against status === 'active') — a `maintenance` vehicle
+    // is excluded from automatic planning, so the manual path must reject it
+    // too, or hand-assignment becomes the way to put a vehicle that's
+    // physically in the garage back on the road.
+    if (vehicle.status !== 'active') {
+      const reason = vehicle.status === 'maintenance' ? 'is in maintenance' : 'is retired'
+      return NextResponse.json(
+        { error: `${vehicle.name} ${reason} and cannot be dispatched.` },
+        { status: 400 },
+      )
     }
 
     const driver = orgDrivers.find((d) => d.id === parsed.data.driverId)
