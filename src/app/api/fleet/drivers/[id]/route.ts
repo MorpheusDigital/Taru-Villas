@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { and, eq } from 'drizzle-orm'
 import { getProfile } from '@/lib/auth/guards'
-import { deleteDriver, setDriverVehicles, updateDriver } from '@/lib/db/queries/fleet'
+import {
+  deleteDriver, listVehicles, setDriverVehicles, updateDriver,
+} from '@/lib/db/queries/fleet'
 import { db } from '@/lib/db'
 import { drivers } from '@/lib/db/schema'
 
@@ -13,7 +15,8 @@ const updateSchema = z.object({
   phone: z.string().max(50).nullable().optional(),
   preferredLanguage: z.enum(['en', 'si', 'ta']).optional(),
   isActive: z.boolean().optional(),
-  vehicleIds: z.array(z.string().uuid()).optional(),
+  vehicleIds: z.array(z.string().uuid()).optional()
+    .transform((ids) => (ids ? Array.from(new Set(ids)) : ids)),
 })
 
 // Task 6's updateDriver/deleteDriver take a bare id with no org filter, so
@@ -28,11 +31,26 @@ async function driverBelongsToOrg(id: string, orgId: string) {
   return rows.length > 0
 }
 
+/**
+ * Returns the subset of vehicleIds that do not belong to this org, so
+ * callers can reject a bad payload with a useful 400 before mutating
+ * anything (an unknown or cross-org id would otherwise surface as a bare
+ * 500 from the driver_vehicles foreign key, after the driver row itself
+ * had already been updated).
+ */
+async function findInvalidVehicleIds(orgId: string, vehicleIds: string[]) {
+  if (vehicleIds.length === 0) return []
+  const orgVehicles = await listVehicles(orgId)
+  const validIds = new Set(orgVehicles.map((v) => v.id))
+  return vehicleIds.filter((id) => !validIds.has(id))
+}
+
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params
     const profile = await getProfile()
     if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
     if (profile.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     if (!(await driverBelongsToOrg(id, profile.orgId))) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -49,6 +67,19 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     // vehicleIds is handled separately: absent means "leave licences alone",
     // present (including []) means "replace the licence set".
     const { vehicleIds, ...rest } = parsed.data
+
+    // Validate before touching the driver row at all — a bad vehicle id
+    // must not leave the name/phone/etc. update committed while the
+    // licence write fails underneath it.
+    if (vehicleIds !== undefined) {
+      const invalidIds = await findInvalidVehicleIds(profile.orgId, vehicleIds)
+      if (invalidIds.length > 0) {
+        return NextResponse.json(
+          { error: `Unknown vehicle id(s): ${invalidIds.join(', ')}` },
+          { status: 400 },
+        )
+      }
+    }
 
     const updated = await updateDriver(id, rest)
     if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -69,6 +100,7 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
     const { id } = await context.params
     const profile = await getProfile()
     if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
     if (profile.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     if (!(await driverBelongsToOrg(id, profile.orgId))) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })

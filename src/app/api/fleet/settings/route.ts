@@ -13,6 +13,7 @@ export async function GET() {
   try {
     const profile = await getProfile()
     if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
     return NextResponse.json(await getFleetSettings(profile.orgId))
   } catch (error) {
     console.error('GET /api/fleet/settings error:', error)
@@ -24,6 +25,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const profile = await getProfile()
     if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
     if (profile.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const parsed = updateSchema.safeParse(await request.json().catch(() => null))
@@ -33,6 +35,11 @@ export async function PATCH(request: NextRequest) {
         { status: 400 },
       )
     }
+
+    // The settings row is created lazily by getFleetSettings on first read.
+    // If a PATCH arrives before any GET has, materialise it first — otherwise
+    // the update below matches zero rows and a valid admin request 404s.
+    await getFleetSettings(profile.orgId)
 
     const updated = await updateFleetSettings(profile.orgId, parsed.data)
     if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 })

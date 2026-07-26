@@ -36,6 +36,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const { id } = await context.params
     const profile = await getProfile()
     if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
     if (profile.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     if (!(await vehicleBelongsToOrg(id, profile.orgId))) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -49,9 +50,21 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       )
     }
 
-    const updated = await updateVehicle(id, parsed.data)
-    if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    return NextResponse.json(updated)
+    try {
+      const updated = await updateVehicle(id, parsed.data)
+      if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      return NextResponse.json(updated)
+    } catch (e) {
+      // A rename onto an existing (orgId, name) pair hits vehicles_org_name_unique.
+      const code = (e as { code?: string }).code
+      if (code === '23505') {
+        return NextResponse.json(
+          { error: 'A vehicle with that name already exists' },
+          { status: 409 },
+        )
+      }
+      throw e
+    }
   } catch (error) {
     console.error('PATCH /api/fleet/vehicles/[id] error:', error)
     return NextResponse.json({ error: 'Failed to update vehicle' }, { status: 500 })
@@ -63,6 +76,7 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
     const { id } = await context.params
     const profile = await getProfile()
     if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
     if (profile.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     if (!(await vehicleBelongsToOrg(id, profile.orgId))) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })

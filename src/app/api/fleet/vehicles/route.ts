@@ -18,6 +18,7 @@ export async function GET() {
   try {
     const profile = await getProfile()
     if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
     return NextResponse.json({ vehicles: await listVehicles(profile.orgId) })
   } catch (error) {
     console.error('GET /api/fleet/vehicles error:', error)
@@ -29,6 +30,7 @@ export async function POST(request: NextRequest) {
   try {
     const profile = await getProfile()
     if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
     if (profile.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const parsed = createSchema.safeParse(await request.json().catch(() => null))
@@ -39,13 +41,25 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const vehicle = await createVehicle({
-      ...parsed.data,
-      registrationNo: parsed.data.registrationNo ?? null,
-      currentLocationPropertyId: parsed.data.currentLocationPropertyId ?? null,
-      orgId: profile.orgId,
-    })
-    return NextResponse.json(vehicle, { status: 201 })
+    try {
+      const vehicle = await createVehicle({
+        ...parsed.data,
+        registrationNo: parsed.data.registrationNo ?? null,
+        currentLocationPropertyId: parsed.data.currentLocationPropertyId ?? null,
+        orgId: profile.orgId,
+      })
+      return NextResponse.json(vehicle, { status: 201 })
+    } catch (e) {
+      // A duplicate (orgId, name) pair is protected by vehicles_org_name_unique.
+      const code = (e as { code?: string }).code
+      if (code === '23505') {
+        return NextResponse.json(
+          { error: 'A vehicle with that name already exists' },
+          { status: 409 },
+        )
+      }
+      throw e
+    }
   } catch (error) {
     console.error('POST /api/fleet/vehicles error:', error)
     return NextResponse.json({ error: 'Failed to create vehicle' }, { status: 500 })
