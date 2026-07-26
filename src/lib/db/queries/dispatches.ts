@@ -83,7 +83,11 @@ export async function loadEngineInput(orgId: string, today: string): Promise<Eng
       listDistances(orgId),
       db.select().from(vehicles).where(eq(vehicles.orgId, orgId)),
       db.select().from(drivers).where(eq(drivers.orgId, orgId)),
-      db.select().from(driverVehicles),
+      db
+        .select({ driverId: driverVehicles.driverId, vehicleId: driverVehicles.vehicleId })
+        .from(driverVehicles)
+        .innerJoin(drivers, eq(driverVehicles.driverId, drivers.id))
+        .where(eq(drivers.orgId, orgId)),
       db
         .select()
         .from(dispatches)
@@ -173,7 +177,13 @@ export async function replaceDraftDispatches(orgId: string, result: EngineResult
     const staleDrafts = await tx
       .select({ id: dispatches.id })
       .from(dispatches)
-      .where(and(eq(dispatches.orgId, orgId), eq(dispatches.status, 'draft')))
+      .where(
+        and(
+          eq(dispatches.orgId, orgId),
+          eq(dispatches.status, 'draft'),
+          eq(dispatches.generatedBy, 'engine'),
+        ),
+      )
 
     if (staleDrafts.length > 0) {
       const ids = staleDrafts.map((d) => d.id)
@@ -223,7 +233,12 @@ export async function replaceDraftDispatches(orgId: string, result: EngineResult
       await tx
         .update(fleetRequests)
         .set({ status: 'queued', updatedAt: new Date() })
-        .where(inArray(fleetRequests.id, draft.stops.map((s) => s.requestId)))
+        .where(
+          and(
+            inArray(fleetRequests.id, draft.stops.map((s) => s.requestId)),
+            ne(fleetRequests.status, 'cancelled'),
+          ),
+        )
         .returning()
 
       created.push(dispatch.id)
@@ -359,7 +374,7 @@ export async function createManualDispatch(
       const requests = await tx
         .select()
         .from(fleetRequests)
-        .where(inArray(fleetRequests.id, data.requestIds))
+        .where(and(inArray(fleetRequests.id, data.requestIds), eq(fleetRequests.orgId, orgId)))
 
       await tx
         .insert(dispatchStops)
@@ -377,7 +392,13 @@ export async function createManualDispatch(
       await tx
         .update(fleetRequests)
         .set({ status: 'queued', updatedAt: new Date() })
-        .where(inArray(fleetRequests.id, data.requestIds))
+        .where(
+          and(
+            inArray(fleetRequests.id, data.requestIds),
+            eq(fleetRequests.orgId, orgId),
+            ne(fleetRequests.status, 'cancelled'),
+          ),
+        )
         .returning()
     }
 
@@ -437,25 +458,30 @@ export async function markDispatchStarted(id: string, driverId: string) {
   const [updated] = await db
     .update(dispatches)
     .set({ status: 'in_progress', startedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(dispatches.id, id), eq(dispatches.driverId, driverId), ne(dispatches.status, 'completed')))
+    .where(
+      and(
+        eq(dispatches.id, id),
+        eq(dispatches.driverId, driverId),
+        inArray(dispatches.status, ['approved', 'in_progress']),
+      ),
+    )
     .returning()
   return updated
 }
 
 export async function markStopArrived(stopId: string, driverId: string) {
-  const rows = await db
-    .select({ dispatchId: dispatchStops.dispatchId })
-    .from(dispatchStops)
-    .innerJoin(dispatches, eq(dispatchStops.dispatchId, dispatches.id))
-    .where(and(eq(dispatchStops.id, stopId), eq(dispatches.driverId, driverId)))
-    .limit(1)
-
-  if (!rows[0]) return undefined
-
   const [updated] = await db
     .update(dispatchStops)
     .set({ arrivedAt: new Date() })
-    .where(eq(dispatchStops.id, stopId))
+    .where(
+      and(
+        eq(dispatchStops.id, stopId),
+        inArray(
+          dispatchStops.dispatchId,
+          db.select({ id: dispatches.id }).from(dispatches).where(eq(dispatches.driverId, driverId)),
+        ),
+      ),
+    )
     .returning()
   return updated
 }
@@ -470,7 +496,13 @@ export async function completeDispatch(id: string, driverId: string) {
     const [updated] = await tx
       .update(dispatches)
       .set({ status: 'completed', completedAt: now, updatedAt: now })
-      .where(and(eq(dispatches.id, id), eq(dispatches.driverId, driverId)))
+      .where(
+        and(
+          eq(dispatches.id, id),
+          eq(dispatches.driverId, driverId),
+          inArray(dispatches.status, ['approved', 'in_progress']),
+        ),
+      )
       .returning()
 
     if (!updated) return undefined
@@ -481,18 +513,25 @@ export async function completeDispatch(id: string, driverId: string) {
       .where(eq(dispatchStops.dispatchId, id))
       .orderBy(desc(dispatchStops.sortOrder))
 
-    await tx
-      .update(vehicles)
-      .set({ currentLocationPropertyId: stops[0]?.propertyId ?? null, updatedAt: now })
-      .where(eq(vehicles.id, updated.vehicleId))
-      .returning()
+    // A stop that doesn't resolve to a property (standalone free-text trip,
+    // or a dispatch with no stops) tells us nothing about where the vehicle
+    // is now — leave its recorded location untouched rather than defaulting
+    // to head office, which is what `null` means in this system.
+    const lastPropertyId = stops[0]?.propertyId ?? null
+    if (lastPropertyId !== null) {
+      await tx
+        .update(vehicles)
+        .set({ currentLocationPropertyId: lastPropertyId, updatedAt: now })
+        .where(eq(vehicles.id, updated.vehicleId))
+        .returning()
+    }
 
     const requestIds = stops.map((s) => s.requestId).filter((v): v is string => v !== null)
     if (requestIds.length > 0) {
       await tx
         .update(fleetRequests)
         .set({ status: 'completed', updatedAt: now })
-        .where(inArray(fleetRequests.id, requestIds))
+        .where(and(inArray(fleetRequests.id, requestIds), ne(fleetRequests.status, 'cancelled')))
         .returning()
     }
 
