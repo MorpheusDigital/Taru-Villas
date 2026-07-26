@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, ne } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, ne, not, notExists, or } from 'drizzle-orm'
 import { db } from '..'
 import {
   dispatches,
@@ -75,6 +75,22 @@ export async function cancelRequest(id: string) {
 
 // --- Engine plumbing -------------------------------------------------------
 
+/**
+ * True for dispatches the "Run engine now" rebuild is free to discard and
+ * replan: engine-generated drafts. `replaceDraftDispatches`'s cleanup,
+ * `loadEngineInput`'s claimed-request exclusion, and its busy-vehicle set
+ * all have to agree on exactly this predicate — if any of the three drifts
+ * from the others, a request or a vehicle can fall through the gap between
+ * "still claimed" and "free to re-plan", which is how duplicate dispatches
+ * on one vehicle come back.
+ */
+function isDiscardableEngineDraft() {
+  // `and()` with two fixed arguments always returns a defined SQL fragment;
+  // the `!` just satisfies its general `SQL | undefined` signature so this
+  // can be passed to `not()`, which requires a non-undefined SQLWrapper.
+  return and(eq(dispatches.status, 'draft'), eq(dispatches.generatedBy, 'engine'))!
+}
+
 /** Gathers everything planDispatches() needs, converting numerics to numbers. */
 export async function loadEngineInput(orgId: string, today: string): Promise<EngineInput> {
   const [settings, distances, vehicleRows, driverRows, licenceRows, liveDispatches, requestRows] =
@@ -88,10 +104,22 @@ export async function loadEngineInput(orgId: string, today: string): Promise<Eng
         .from(driverVehicles)
         .innerJoin(drivers, eq(driverVehicles.driverId, drivers.id))
         .where(eq(drivers.orgId, orgId)),
+      // Vehicle/driver busy set: approved-or-running work, plus surviving
+      // manual drafts (the rebuild never discards these — see
+      // isDiscardableEngineDraft — so their resources must read as claimed,
+      // not free, or the engine can double-book them into a fresh draft).
       db
         .select()
         .from(dispatches)
-        .where(and(eq(dispatches.orgId, orgId), inArray(dispatches.status, ['approved', 'in_progress']))),
+        .where(
+          and(
+            eq(dispatches.orgId, orgId),
+            or(
+              inArray(dispatches.status, ['approved', 'in_progress']),
+              and(eq(dispatches.status, 'draft'), eq(dispatches.generatedBy, 'manual')),
+            ),
+          ),
+        ),
       db
         .select({
           id: fleetRequests.id,
@@ -107,7 +135,30 @@ export async function loadEngineInput(orgId: string, today: string): Promise<Eng
         })
         .from(fleetRequests)
         .leftJoin(profiles, eq(fleetRequests.requestedBy, profiles.id))
-        .where(and(eq(fleetRequests.orgId, orgId), inArray(fleetRequests.status, ['pending', 'queued']))),
+        .where(
+          and(
+            eq(fleetRequests.orgId, orgId),
+            inArray(fleetRequests.status, ['pending', 'queued']),
+            // Exclude requests already claimed by a dispatch the rebuild
+            // won't discard (approved/in-progress work, or a surviving
+            // manual draft). A request claimed only by an engine draft is
+            // still fed in — that draft is about to be discarded and
+            // re-planned by replaceDraftDispatches.
+            notExists(
+              db
+                .select({ id: dispatchStops.id })
+                .from(dispatchStops)
+                .innerJoin(dispatches, eq(dispatchStops.dispatchId, dispatches.id))
+                .where(
+                  and(
+                    eq(dispatchStops.requestId, fleetRequests.id),
+                    eq(dispatches.orgId, orgId),
+                    not(isDiscardableEngineDraft()),
+                  ),
+                ),
+            ),
+          ),
+        ),
     ])
 
   const licencesByDriver = new Map<string, string[]>()
@@ -177,13 +228,7 @@ export async function replaceDraftDispatches(orgId: string, result: EngineResult
     const staleDrafts = await tx
       .select({ id: dispatches.id })
       .from(dispatches)
-      .where(
-        and(
-          eq(dispatches.orgId, orgId),
-          eq(dispatches.status, 'draft'),
-          eq(dispatches.generatedBy, 'engine'),
-        ),
-      )
+      .where(and(eq(dispatches.orgId, orgId), isDiscardableEngineDraft()))
 
     if (staleDrafts.length > 0) {
       const ids = staleDrafts.map((d) => d.id)
@@ -204,6 +249,25 @@ export async function replaceDraftDispatches(orgId: string, result: EngineResult
 
     const created: string[] = []
     for (const draft of result.drafts) {
+      // The plan was computed from a `loadEngineInput` snapshot that may
+      // now be stale — a request in `draft.stops` can have been cancelled
+      // in the gap between planning and this transaction. Re-check right
+      // before building the stop rows so a cancelled request never gets a
+      // stop (matching the `ne('cancelled')` guard already on the status
+      // update below).
+      const draftRequestIds = draft.stops.map((s) => s.requestId)
+      const liveRequestIds = new Set(
+        draftRequestIds.length > 0
+          ? (
+              await tx
+                .select({ id: fleetRequests.id })
+                .from(fleetRequests)
+                .where(and(inArray(fleetRequests.id, draftRequestIds), ne(fleetRequests.status, 'cancelled')))
+            ).map((r) => r.id)
+          : [],
+      )
+      const liveStops = draft.stops.filter((s) => liveRequestIds.has(s.requestId))
+
       const [dispatch] = await tx
         .insert(dispatches)
         .values({
@@ -217,29 +281,31 @@ export async function replaceDraftDispatches(orgId: string, result: EngineResult
         })
         .returning()
 
-      await tx
-        .insert(dispatchStops)
-        .values(
-          draft.stops.map((s) => ({
-            dispatchId: dispatch.id,
-            requestId: s.requestId,
-            propertyId: s.propertyId,
-            label: s.label,
-            sortOrder: s.sortOrder,
-          })),
-        )
-        .returning()
+      if (liveStops.length > 0) {
+        await tx
+          .insert(dispatchStops)
+          .values(
+            liveStops.map((s) => ({
+              dispatchId: dispatch.id,
+              requestId: s.requestId,
+              propertyId: s.propertyId,
+              label: s.label,
+              sortOrder: s.sortOrder,
+            })),
+          )
+          .returning()
 
-      await tx
-        .update(fleetRequests)
-        .set({ status: 'queued', updatedAt: new Date() })
-        .where(
-          and(
-            inArray(fleetRequests.id, draft.stops.map((s) => s.requestId)),
-            ne(fleetRequests.status, 'cancelled'),
-          ),
-        )
-        .returning()
+        await tx
+          .update(fleetRequests)
+          .set({ status: 'queued', updatedAt: new Date() })
+          .where(
+            and(
+              inArray(fleetRequests.id, liveStops.map((s) => s.requestId)),
+              ne(fleetRequests.status, 'cancelled'),
+            ),
+          )
+          .returning()
+      }
 
       created.push(dispatch.id)
     }
@@ -336,7 +402,7 @@ export async function approveDispatch(id: string, approvedBy: string) {
       await tx
         .update(fleetRequests)
         .set({ status: 'dispatched', updatedAt: now })
-        .where(inArray(fleetRequests.id, requestIds))
+        .where(and(inArray(fleetRequests.id, requestIds), ne(fleetRequests.status, 'cancelled')))
         .returning()
     }
 
@@ -374,24 +440,6 @@ export async function createManualDispatch(
       const requests = await tx
         .select()
         .from(fleetRequests)
-        .where(and(inArray(fleetRequests.id, data.requestIds), eq(fleetRequests.orgId, orgId)))
-
-      await tx
-        .insert(dispatchStops)
-        .values(
-          requests.map((r, i) => ({
-            dispatchId: dispatch.id,
-            requestId: r.id,
-            propertyId: r.targetPropertyId,
-            label: r.destinationText,
-            sortOrder: i,
-          })),
-        )
-        .returning()
-
-      await tx
-        .update(fleetRequests)
-        .set({ status: 'queued', updatedAt: new Date() })
         .where(
           and(
             inArray(fleetRequests.id, data.requestIds),
@@ -399,7 +447,36 @@ export async function createManualDispatch(
             ne(fleetRequests.status, 'cancelled'),
           ),
         )
-        .returning()
+
+      // `requests` can come back empty if every id was foreign-org or
+      // already cancelled — guard the insert so it's never called with an
+      // empty values array.
+      if (requests.length > 0) {
+        await tx
+          .insert(dispatchStops)
+          .values(
+            requests.map((r, i) => ({
+              dispatchId: dispatch.id,
+              requestId: r.id,
+              propertyId: r.targetPropertyId,
+              label: r.destinationText,
+              sortOrder: i,
+            })),
+          )
+          .returning()
+
+        await tx
+          .update(fleetRequests)
+          .set({ status: 'queued', updatedAt: new Date() })
+          .where(
+            and(
+              inArray(fleetRequests.id, data.requestIds),
+              eq(fleetRequests.orgId, orgId),
+              ne(fleetRequests.status, 'cancelled'),
+            ),
+          )
+          .returning()
+      }
     }
 
     return dispatch
