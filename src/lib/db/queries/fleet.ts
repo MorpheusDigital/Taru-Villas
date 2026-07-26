@@ -178,7 +178,7 @@ export async function upsertDistance(
       set: { distanceKm: distanceKm.toFixed(1), driveMinutes, updatedAt: new Date() },
     })
     .returning()
-  return row
+  return { ...row, distanceKm: parseFloat(row.distanceKm) }
 }
 
 // --- Settings --------------------------------------------------------------
@@ -223,5 +223,6 @@ export async function updateFleetSettings(
     })
     .where(eq(fleetSettings.orgId, orgId))
     .returning()
-  return updated
+  if (!updated) return undefined
+  return { ...updated, poolingThresholdKm: parseFloat(updated.poolingThresholdKm) }
 }
