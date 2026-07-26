@@ -1164,6 +1164,13 @@ const drivers: EngineDriver[] = [
   { id: 'd-sunil', fullName: 'Sunil', isActive: true, vehicleIds: ['v-lorry', 'v-van'] },
 ]
 
+// A second van, used only by the tests that need two clusters served at once.
+const vanB: EngineVehicle = { ...van, id: 'v-van-b', name: 'Van B', sortOrder: 3 }
+const bothVanDrivers: EngineDriver[] = [
+  { id: 'd-nimal', fullName: 'Nimal', isActive: true, vehicleIds: ['v-van', 'v-van-b'] },
+  { id: 'd-sunil', fullName: 'Sunil', isActive: true, vehicleIds: ['v-van', 'v-van-b'] },
+]
+
 function request(over: Partial<EngineRequest> & { id: string }): EngineRequest {
   return {
     requestType: 'visit',
@@ -1220,23 +1227,36 @@ describe('planDispatches', () => {
     expect(r.drafts[0].stops.map((s) => s.sortOrder)).toEqual([0, 1])
   })
 
+  // The default fixture has exactly ONE vehicle a non-privileged 2-pax request
+  // can use (the lorry seats 1, Car 1 is restricted), so two unpooled clusters
+  // could not both be served and the second would land in `unassignable` for a
+  // reason that has nothing to do with distance. These two tests therefore
+  // supply two interchangeable vans and drivers licensed for both, isolating
+  // the clustering decision from vehicle scarcity. Asserting `unassignable` is
+  // empty is what makes them strict: two drafts AND nothing dropped.
   it('refuses to pool destinations beyond the distance threshold', () => {
     const r = planDispatches(input({
+      vehicles: [van, vanB],
+      drivers: bothVanDrivers,
       requests: [
         request({ id: 'r1', targetPropertyId: 'p1' }),
         request({ id: 'r2', targetPropertyId: 'p3' }),
       ],
     }))
+    expect(r.unassignable).toEqual([])
     expect(r.drafts).toHaveLength(2)
   })
 
   it('refuses to pool when the distance pair is unknown', () => {
     const r = planDispatches(input({
+      vehicles: [van, vanB],
+      drivers: bothVanDrivers,
       requests: [
         request({ id: 'r1', targetPropertyId: 'p1' }),
         request({ id: 'r2', targetPropertyId: 'p-unknown' }),
       ],
     }))
+    expect(r.unassignable).toEqual([])
     expect(r.drafts).toHaveLength(2)
   })
 
