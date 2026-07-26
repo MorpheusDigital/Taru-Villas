@@ -19,29 +19,70 @@ const subscriptionSchema = z.object({
 /** A driver replacing phones should never be locked out, so the cap evicts the oldest row instead of rejecting the new one. */
 const MAX_SUBSCRIPTIONS_PER_DRIVER = 5
 
+/** True for a.b.c.d in 0.0.0.0/8, 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, or 169.254.0.0/16 (the last covers cloud metadata endpoints like 169.254.169.254). */
+function isDisallowedIPv4(a: number, b: number): boolean {
+  if (a === 0 || a === 127 || a === 10) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 192 && b === 168) return true
+  if (a === 169 && b === 254) return true
+  return false
+}
+
 /**
- * Rejects loopback/private-range/link-local/`.local` hosts (this includes
- * cloud metadata endpoints like 169.254.169.254). Real push services
- * (fcm.googleapis.com, updates.push.services.mozilla.com, *.push.apple.com,
- * *.windows.com) are always public HTTPS hosts, so this is a no-op for
- * legitimate subscriptions and closes off the endpoint as a blind
- * server-side-request primitive for anyone holding a driver token.
+ * `addr` is the bracket-stripped, lowercased IPv6 literal from `url.hostname`
+ * (WHATWG normalizes to compressed form, e.g. `::1`, `fe80::1`, `::ffff:7f00:1`
+ * for an IPv4-mapped address — never the uncompressed 8-hextet form). Rejects:
+ * loopback (`::1`), unspecified (`::`), unique-local `fc00::/7`, link-local
+ * `fe80::/10` (by numeric range on the first hextet, not a string prefix — a
+ * plain `startsWith` would also match unrelated hostnames if ever applied to
+ * one, which is exactly last round's bug), and IPv4-mapped addresses
+ * (`::ffff:a.b.c.d` or the hex-group form) that resolve to a disallowed IPv4
+ * range — otherwise a dual-stack host lets `[::ffff:169.254.169.254]` reach
+ * the same metadata endpoint the plain IPv4 check already blocks.
+ */
+function isDisallowedIPv6(addr: string): boolean {
+  if (addr === '::1' || addr === '::') return true
+
+  const dottedMapped = addr.match(/^::ffff:(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/)
+  if (dottedMapped) return isDisallowedIPv4(parseInt(dottedMapped[1], 10), parseInt(dottedMapped[2], 10))
+
+  // Second hex group (low 16 bits) isn't captured — isDisallowedIPv4 only
+  // ever needs octets a/b, which live entirely in the first hex group.
+  const hexMapped = addr.match(/^::ffff:([0-9a-f]{1,4}):[0-9a-f]{1,4}$/)
+  if (hexMapped) {
+    const v1 = parseInt(hexMapped[1], 16)
+    return isDisallowedIPv4((v1 >> 8) & 0xff, v1 & 0xff)
+  }
+
+  const firstHextet = addr.split(':')[0]
+  const value = firstHextet ? parseInt(firstHextet, 16) : NaN
+  if (!Number.isNaN(value)) {
+    if (value >= 0xfc00 && value <= 0xfdff) return true // fc00::/7 unique-local
+    if (value >= 0xfe80 && value <= 0xfebf) return true // fe80::/10 link-local
+  }
+  return false
+}
+
+/**
+ * Rejects loopback/private-range/link-local/`.local` hosts. Real push
+ * services (fcm.googleapis.com, updates.push.services.mozilla.com,
+ * *.push.apple.com, *.windows.com) are always public HTTPS hostnames, never
+ * bracketed IPv6 literals, so the IPv6-specific checks below run ONLY when
+ * `hostname` is actually a `[...]`-wrapped literal (per WHATWG `URL.hostname`)
+ * — applying an IPv6 prefix test like `startsWith('fc')` to every hostname
+ * unconditionally is what broke every Chromium/FCM endpoint last round,
+ * since `fcm.googleapis.com` also starts with `fc`.
  */
 function isPrivateOrLocalHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  if (host === 'localhost' || host.endsWith('.local')) return true
-  if (host === '::1' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) {
-    return true
+  const lower = hostname.toLowerCase()
+  if (lower.startsWith('[') && lower.endsWith(']')) {
+    return isDisallowedIPv6(lower.slice(1, -1))
   }
-  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/)
-  if (ipv4) {
-    const a = parseInt(ipv4[1], 10)
-    const b = parseInt(ipv4[2], 10)
-    if (a === 0 || a === 127 || a === 10) return true
-    if (a === 172 && b >= 16 && b <= 31) return true
-    if (a === 192 && b === 168) return true
-    if (a === 169 && b === 254) return true
-  }
+  if (lower === 'localhost' || lower.endsWith('.local')) return true
+
+  const ipv4 = lower.match(/^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/)
+  if (ipv4) return isDisallowedIPv4(parseInt(ipv4[1], 10), parseInt(ipv4[2], 10))
+
   return false
 }
 
