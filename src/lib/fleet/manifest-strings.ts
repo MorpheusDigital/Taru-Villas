@@ -12,6 +12,7 @@ export interface ManifestStrings {
   passengers: string
   cargo: string
   stops: string
+  pickUp: string
   inProgress: string
   enableNotifications: string
   notificationsOn: string
@@ -48,6 +49,7 @@ export const MANIFEST_STRINGS: Record<ManifestLanguage, ManifestStrings> = {
     passengers: 'Passengers',
     cargo: 'Cargo',
     stops: 'Stops',
+    pickUp: 'Collect from',
     inProgress: 'In progress',
     enableNotifications: 'Turn on trip alerts',
     notificationsOn: 'Trip alerts are on',
@@ -78,6 +80,7 @@ export const MANIFEST_STRINGS: Record<ManifestLanguage, ManifestStrings> = {
     passengers: 'මගීන්',
     cargo: 'බඩු',
     stops: 'නැවතුම්',
+    pickUp: 'රැගෙන යන ස්ථානය',
     inProgress: 'ගමනේ යෙදී සිටී',
     enableNotifications: 'ගමන් දැනුම්දීම් සක්‍රීය කරන්න',
     notificationsOn: 'ගමන් දැනුම්දීම් සක්‍රීයයි',
@@ -108,6 +111,7 @@ export const MANIFEST_STRINGS: Record<ManifestLanguage, ManifestStrings> = {
     passengers: 'பயணிகள்',
     cargo: 'சரக்கு',
     stops: 'நிறுத்தங்கள்',
+    pickUp: 'அழைத்துச் செல்லும் இடம்',
     inProgress: 'பயணத்தில்',
     enableNotifications: 'பயண அறிவிப்புகளை இயக்கு',
     notificationsOn: 'பயண அறிவிப்புகள் இயக்கத்தில்',

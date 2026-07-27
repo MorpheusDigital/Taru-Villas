@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { colomboToday, formatColomboTime } from '@/lib/fleet/dates'
+import { formatOriginLabel } from '@/lib/fleet/labels'
 import {
   formatManifestDayMonth,
   MANIFEST_STRINGS,
@@ -350,6 +351,19 @@ function StopCard({
           {stop.propertyLocation && <p className="text-base text-muted-foreground">{stop.propertyLocation}</p>}
         </div>
       </div>
+
+      {stop.originKind && (
+        <p className="text-base text-muted-foreground">
+          {strings.pickUp}:{' '}
+          <span className="font-medium text-foreground">
+            {formatOriginLabel({
+              originKind: stop.originKind,
+              originPropertyName: stop.originPropertyName,
+              originText: stop.originText,
+            })}
+          </span>
+        </p>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <span className="flex items-center gap-1.5 text-base">
