@@ -41,14 +41,14 @@ export function PushSetupBanner({ token, vapidPublicKey, strings }: PushSetupBan
 
   async function enable() {
     if (!vapidPublicKey) {
-      toast.error('Notifications are not configured. Contact the office.')
+      toast.error(strings.pushNotConfigured)
       return
     }
     setBusy(true)
     try {
       const permission = await Notification.requestPermission()
       if (permission !== 'granted') {
-        toast.error('Notifications were blocked. Enable them in your browser settings.')
+        toast.error(strings.pushBlocked)
         return
       }
 
@@ -63,12 +63,21 @@ export function PushSetupBanner({ token, vapidPublicKey, strings }: PushSetupBan
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(subscription.toJSON()),
       })
-      if (!res.ok) throw new Error('Could not save subscription')
+      // Raw server/browser error text (e.g. from a failed fetch, or a
+      // DOMException out of pushManager.subscribe) is never shown to the
+      // driver — it's English-only and this page must not surface
+      // unlocalized copy. It's logged for whoever's debugging instead, and
+      // the driver sees a translated, actionable message.
+      if (!res.ok) {
+        toast.error(strings.pushSaveFailed)
+        return
+      }
 
       setSubscribed(true)
       toast.success(strings.notificationsOn)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not turn on alerts')
+      console.error('Push subscribe failed:', error)
+      toast.error(strings.pushEnableFailed)
     } finally {
       setBusy(false)
     }

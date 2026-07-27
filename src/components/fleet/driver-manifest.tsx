@@ -134,23 +134,27 @@ export function DriverManifest({
           return
         }
         if (stillListed === null) {
+          // The verification GET itself couldn't be loaded, so we genuinely
+          // don't know whether the tap took — this is a load failure, not a
+          // confirmed write failure, hence loadError rather than
+          // statusUpdateFailed.
           toast.error(strings.loadError, {
             action: { label: strings.retry, onClick: () => runStatusAction(key, body, recoverDispatchId) },
           })
           return
         }
         // Still listed: this 404 is real (not this driver's dispatch, or
-        // truly gone), not a double-tap artifact.
-        toast.error(strings.loadError)
+        // truly gone), not a double-tap artifact — the write itself failed.
+        toast.error(strings.statusUpdateFailed)
         return
       }
 
-      const message = await parseErrorMessage(res, strings.loadError)
+      const message = await parseErrorMessage(res, strings.statusUpdateFailed)
       console.error('Fleet driver status update failed:', message)
-      toast.error(strings.loadError)
+      toast.error(strings.statusUpdateFailed)
     } catch (error) {
       console.error('Fleet driver status update error:', error)
-      toast.error(strings.loadError)
+      toast.error(strings.statusUpdateFailed)
     } finally {
       setBusyKey(null)
     }
@@ -213,6 +217,15 @@ export function DriverManifest({
       {initialDispatches.length === 0 && (
         <div className="flex flex-col items-center justify-center py-24 text-center">
           <p className="text-xl font-medium text-muted-foreground">{strings.noTrips}</p>
+        </div>
+      )}
+
+      {/* Dispatches exist, just none of them cover today: say so explicitly
+          rather than leaving this slot blank — a driver looking at an empty
+          space here cannot tell "nothing today" from "the page is broken". */}
+      {initialDispatches.length > 0 && !todayDispatch && (
+        <div className="flex flex-col items-center justify-center rounded-lg border py-16 text-center">
+          <p className="text-xl font-medium text-muted-foreground">{strings.noTripToday}</p>
         </div>
       )}
 
