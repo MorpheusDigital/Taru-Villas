@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { formatDayMonth } from '@/lib/fleet/dates'
+import { formatTripRoute } from '@/lib/fleet/labels'
 import { validateVehicleForCluster } from '@/lib/fleet/constraints'
 import type { Vehicle } from '@/lib/db/schema'
 import type { DispatchRow, DriverWithPush } from './dispatch-board'
@@ -431,8 +432,7 @@ export function DispatchEditorDialog({
                   <p className="px-1 pb-1 text-xs font-medium text-muted-foreground">Available to add</p>
                 )}
                 {pendingRequests.map((r) => {
-                  const label =
-                    r.requestType === 'visit' ? (r.propertyName ?? 'Unknown property') : (r.destinationText ?? '—')
+                  const label = formatTripRoute(r)
                   return (
                     <label
                       key={r.id}

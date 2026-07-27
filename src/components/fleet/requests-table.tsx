@@ -55,6 +55,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { formatDayMonth } from '@/lib/fleet/dates'
+import { formatTripRoute } from '@/lib/fleet/labels'
 import type { Property, Vehicle } from '@/lib/db/schema'
 import { RequestForm, type FleetRequestRow } from './request-form'
 
@@ -140,13 +141,8 @@ function createColumns(
     },
     {
       id: 'destination',
-      header: 'Destination',
-      cell: ({ row }) => {
-        const r = row.original
-        const label =
-          r.requestType === 'visit' ? (r.propertyName ?? 'Unknown property') : (r.destinationText ?? '—')
-        return <span className="font-medium">{label}</span>
-      },
+      header: 'Route',
+      cell: ({ row }) => <span className="font-medium">{formatTripRoute(row.original)}</span>,
     },
     {
       id: 'dates',

@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, gte, inArray, ne, not, notExists, or } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import { db } from '..'
 import {
   dispatches,
@@ -24,6 +25,8 @@ export async function listRequests(
   if (filters.status) conditions.push(eq(fleetRequests.status, filters.status))
   if (filters.requestedBy) conditions.push(eq(fleetRequests.requestedBy, filters.requestedBy))
 
+  const originProperty = alias(properties, 'origin_property')
+
   return db
     .select({
       id: fleetRequests.id,
@@ -41,6 +44,9 @@ export async function listRequests(
       targetPropertyId: fleetRequests.targetPropertyId,
       propertyName: properties.name,
       originText: fleetRequests.originText,
+      originKind: fleetRequests.originKind,
+      originPropertyId: fleetRequests.originPropertyId,
+      originPropertyName: originProperty.name,
       destinationText: fleetRequests.destinationText,
       startDate: fleetRequests.startDate,
       endDate: fleetRequests.endDate,
@@ -54,6 +60,7 @@ export async function listRequests(
     .from(fleetRequests)
     .leftJoin(profiles, eq(fleetRequests.requestedBy, profiles.id))
     .leftJoin(properties, eq(fleetRequests.targetPropertyId, properties.id))
+    .leftJoin(originProperty, eq(fleetRequests.originPropertyId, originProperty.id))
     .where(and(...conditions))
     .orderBy(asc(fleetRequests.startDate), desc(fleetRequests.createdAt))
 }
@@ -822,6 +829,8 @@ export async function getDriverDispatches(driverId: string, today: string) {
 
   if (rows.length === 0) return []
 
+  const originProperty = alias(properties, 'origin_property')
+
   const stops = await db
     .select({
       id: dispatchStops.id,
@@ -833,10 +842,14 @@ export async function getDriverDispatches(driverId: string, today: string) {
       arrivedAt: dispatchStops.arrivedAt,
       paxCount: fleetRequests.paxCount,
       cargoRequired: fleetRequests.cargoRequired,
+      originKind: fleetRequests.originKind,
+      originPropertyName: originProperty.name,
+      originText: fleetRequests.originText,
     })
     .from(dispatchStops)
     .leftJoin(properties, eq(dispatchStops.propertyId, properties.id))
     .leftJoin(fleetRequests, eq(dispatchStops.requestId, fleetRequests.id))
+    .leftJoin(originProperty, eq(fleetRequests.originPropertyId, originProperty.id))
     .where(inArray(dispatchStops.dispatchId, rows.map((r) => r.id)))
     .orderBy(asc(dispatchStops.sortOrder))
 

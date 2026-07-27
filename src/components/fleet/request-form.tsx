@@ -38,6 +38,7 @@ async function parseErrorMessage(res: Response, fallback: string): Promise<strin
 interface RequestFormValues {
   requestType: 'visit' | 'standalone'
   targetPropertyId: string
+  originSelection: string
   originText: string
   destinationText: string
   startDate: string
@@ -72,6 +73,20 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
     defaultValues: {
       requestType: request?.requestType ?? 'visit',
       targetPropertyId: request?.targetPropertyId ?? '',
+      // A hard-deleted origin property leaves origin_kind: 'property' but
+      // origin_property_id: null (ON DELETE SET NULL — see the Pick-up
+      // Controller's validate below). Falling through to the bare
+      // `request.originKind` string in that case would resolve this to the
+      // literal 'property', which matches no SelectItem and Radix only
+      // shows a placeholder for '' — so the trigger would render silently
+      // empty instead of the honest "Select a pick-up point" placeholder.
+      // Resolve to '' whenever the kind is 'property' but its id is gone.
+      originSelection:
+        request?.originKind === 'property'
+          ? request.originPropertyId
+            ? `prop:${request.originPropertyId}`
+            : ''
+          : (request?.originKind ?? 'head_office'),
       originText: request?.originText ?? '',
       destinationText: request?.destinationText ?? '',
       startDate: request?.startDate ?? '',
@@ -86,6 +101,7 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
   const requestType = watch('requestType')
   const cargoRequired = watch('cargoRequired')
   const paxCount = watch('paxCount')
+  const originSelection = watch('originSelection')
 
   // `properties` is active-only (correct for creating a new request — nobody
   // should book a visit to a closed property). But when editing an existing
@@ -95,6 +111,15 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
   // as "my property selection was lost". Append that one property back in
   // so the trigger shows the correct name; its own name comes from the
   // request row's already-joined propertyName if it's missing here.
+  //
+  // This is deliberately its OWN memo, separate from pickupPropertyOptions
+  // below, even though both start from the same `properties` array and both
+  // append-one-if-missing. A single shared list would offer this Select the
+  // OTHER field's appended property too — e.g. a visit's deactivated pick-up
+  // property would show up as a choosable, unlabelled-inactive DESTINATION,
+  // and picking it would book a visit to a closed property with no server
+  // check to catch it. Keeping the two lists separate means each Select can
+  // only ever offer its own field's current value back to itself.
   const visitPropertyOptions = useMemo(() => {
     if (!request?.targetPropertyId) return properties
     if (properties.some((p) => p.id === request.targetPropertyId)) return properties
@@ -103,6 +128,22 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
       {
         id: request.targetPropertyId,
         name: request.propertyName ?? 'Inactive property',
+      } as Property,
+    ]
+  }, [properties, request])
+
+  // Mirror of visitPropertyOptions above, for the Pick-up Select's own value
+  // (originPropertyId) instead of the Property Select's (targetPropertyId).
+  // See the comment on visitPropertyOptions for why this must be a separate
+  // memo rather than one shared list re-appending both ids.
+  const pickupPropertyOptions = useMemo(() => {
+    if (!request?.originPropertyId) return properties
+    if (properties.some((p) => p.id === request.originPropertyId)) return properties
+    return [
+      ...properties,
+      {
+        id: request.originPropertyId,
+        name: request.originPropertyName ?? 'Inactive property',
       } as Property,
     ]
   }, [properties, request])
@@ -136,8 +177,17 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
       const body = {
         requestType: values.requestType,
         targetPropertyId: values.requestType === 'visit' ? values.targetPropertyId : null,
+        originKind:
+          values.originSelection === 'head_office'
+            ? ('head_office' as const)
+            : values.originSelection === 'other'
+              ? ('other' as const)
+              : ('property' as const),
+        originPropertyId: values.originSelection.startsWith('prop:')
+          ? values.originSelection.slice('prop:'.length)
+          : null,
         originText:
-          values.requestType === 'standalone' ? (values.originText.trim() || null) : null,
+          values.originSelection === 'other' ? (values.originText.trim() || null) : null,
         destinationText:
           values.requestType === 'standalone' ? (values.destinationText.trim() || null) : null,
         startDate: values.startDate,
@@ -244,15 +294,6 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
 
         <TabsContent value="standalone" className="space-y-5 pt-4">
           <div className="space-y-2">
-            <Label htmlFor="request-origin">Origin</Label>
-            <Input
-              id="request-origin"
-              placeholder="e.g. Head Office"
-              maxLength={500}
-              {...register('originText')}
-            />
-          </div>
-          <div className="space-y-2">
             <Label htmlFor="request-destination">Destination</Label>
             <Input
               id="request-destination"
@@ -284,6 +325,72 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
           </div>
         </TabsContent>
       </Tabs>
+
+      <div className="space-y-2">
+        <Label>Pick-up</Label>
+        <Controller
+          control={control}
+          name="originSelection"
+          // This field is always mounted (it lives outside the Tabs, in the
+          // shared section), so unlike targetPropertyId/destinationText a
+          // plain always-on rule here carries none of the e808935 risk of
+          // firing while off screen — but it still uses `validate`, not a
+          // bare `required`, per the same house rule. Guards against '' (the
+          // unset placeholder state) AND the literal string 'property' (what
+          // a hard-deleted origin property — origin_kind: 'property' with
+          // origin_property_id set to NULL by ON DELETE SET NULL — would
+          // fall through to if this were ever read without the defaults'
+          // own guard above). Mirrors the PATCH/POST routes' own
+          // `.refine((d) => d.originKind !== 'property' || Boolean(d.originPropertyId))`.
+          rules={{
+            validate: (v) => (v !== '' && v !== 'property') || 'Choose a pick-up point',
+          }}
+          render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select a pick-up point" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="head_office">Head Office</SelectItem>
+                {pickupPropertyOptions.map((p) => (
+                  <SelectItem key={p.id} value={`prop:${p.id}`}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+                <SelectItem value="other">Other…</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        />
+        {errors.originSelection && (
+          <p className="text-sm text-destructive">{errors.originSelection.message}</p>
+        )}
+      </div>
+
+      {originSelection === 'other' && (
+        <div className="space-y-2">
+          <Label htmlFor="request-origin-text">Pick-up location</Label>
+          <Input
+            id="request-origin-text"
+            placeholder="e.g. Bandaranaike Airport"
+            maxLength={500}
+            // Scoped with validate, never a bare `required`. register() runs
+            // while this element's props are evaluated, and RHF keeps the rule
+            // once registered — so a bare required here would fire while the
+            // field is hidden, blocking submit with its message off screen.
+            // That is exactly the defect fixed in e808935.
+            {...register('originText', {
+              validate: (v) =>
+                getValues('originSelection') !== 'other' ||
+                Boolean(v?.trim()) ||
+                'Enter a pick-up location',
+            })}
+          />
+          {errors.originText && (
+            <p className="text-sm text-destructive">{errors.originText.message}</p>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
