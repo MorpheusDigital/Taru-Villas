@@ -2,9 +2,19 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { BellOff, BellRing, CalendarClock, Plus } from 'lucide-react'
+import { BellOff, BellRing, CalendarClock, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -136,6 +146,20 @@ function Timeline({
                     const startIdx = timelineDays.indexOf(clampedStart)
                     const endIdx = timelineDays.indexOf(clampedEnd)
                     const span = Math.max(1, endIdx - startIdx + 1)
+                    const label = `${d.driverName} · ${d.stops.length} stop${d.stops.length === 1 ? '' : 's'}`
+                    const barClassName = cn(
+                      'h-8 truncate rounded-md border px-2 text-left text-xs font-medium',
+                      barColors[d.status],
+                    )
+                    // Only a draft can be reassigned (there is no API to
+                    // update or discard an approved/in-progress/completed
+                    // dispatch) — a non-draft bar is not clickable, rather
+                    // than opening an editor whose submit would only ever
+                    // create an unrelated duplicate. See dispatch-editor-
+                    // dialog.tsx's "Edit" flow for why a draft bar's click
+                    // is safe: it creates a replacement and then discards
+                    // the original, never leaving a silent duplicate.
+                    const clickable = d.status === 'draft'
 
                     return (
                       <div
@@ -143,18 +167,25 @@ function Timeline({
                         className="grid"
                         style={{ gridTemplateColumns }}
                       >
-                        <button
-                          type="button"
-                          onClick={() => onClickDispatch(d)}
-                          style={{ gridColumn: `${startIdx + 1} / span ${span}` }}
-                          className={cn(
-                            'h-8 truncate rounded-md border px-2 text-left text-xs font-medium transition-opacity hover:opacity-80',
-                            barColors[d.status],
-                          )}
-                          title={`${d.driverName} — ${d.stops.length} stop${d.stops.length === 1 ? '' : 's'}`}
-                        >
-                          {d.driverName} · {d.stops.length} stop{d.stops.length === 1 ? '' : 's'}
-                        </button>
+                        {clickable ? (
+                          <button
+                            type="button"
+                            onClick={() => onClickDispatch(d)}
+                            style={{ gridColumn: `${startIdx + 1} / span ${span}` }}
+                            className={cn(barClassName, 'transition-opacity hover:opacity-80')}
+                            title={`${label} — click to reassign`}
+                          >
+                            {label}
+                          </button>
+                        ) : (
+                          <div
+                            style={{ gridColumn: `${startIdx + 1} / span ${span}` }}
+                            className={cn(barClassName, 'cursor-default')}
+                            title={label}
+                          >
+                            {label}
+                          </div>
+                        )}
                       </div>
                     )
                   })
@@ -177,12 +208,14 @@ function DraftCard({
   driverById,
   onApprove,
   onEdit,
+  onDiscard,
   isApproving,
 }: {
   dispatch: DispatchRow
   driverById: Map<string, DriverWithPush>
   onApprove: (dispatch: DispatchRow) => void
   onEdit: (dispatch: DispatchRow) => void
+  onDiscard: (dispatch: DispatchRow) => void
   isApproving: boolean
 }) {
   const driver = driverById.get(dispatch.driverId)
@@ -225,6 +258,15 @@ function DraftCard({
         )}
 
         <div className="flex justify-end gap-2 pt-1">
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={() => onDiscard(dispatch)}
+          >
+            <Trash2 className="size-3.5" />
+            Discard
+          </Button>
           <Button variant="outline" size="sm" onClick={() => onEdit(dispatch)}>
             Edit
           </Button>
@@ -256,6 +298,8 @@ export function DispatchBoard({ dispatches, pendingRequests, vehicles, drivers }
   const [editorOpen, setEditorOpen] = useState(false)
   const [editDispatch, setEditDispatch] = useState<DispatchRow | null>(null)
   const [prefillRequest, setPrefillRequest] = useState<FleetRequestRow | null>(null)
+  const [discardTarget, setDiscardTarget] = useState<DispatchRow | null>(null)
+  const [isDiscarding, setIsDiscarding] = useState(false)
   // Reasons come back keyed by requestId from the last "Run engine now"
   // response, and are shown verbatim against the matching request below —
   // they're written for a human to read (e.g. "No cargo-capable vehicle free
@@ -333,6 +377,24 @@ export function DispatchBoard({ dispatches, pendingRequests, vehicles, drivers }
     setEditorOpen(true)
   }
 
+  async function handleDiscard() {
+    if (!discardTarget) return
+    setIsDiscarding(true)
+    try {
+      const res = await fetch(`/api/fleet/dispatches/${discardTarget.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        throw new Error(await parseErrorMessage(res, 'Failed to discard dispatch'))
+      }
+      toast.success('Dispatch discarded — its trips are back in the unassigned queue')
+      setDiscardTarget(null)
+      router.refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to discard dispatch')
+    } finally {
+      setIsDiscarding(false)
+    }
+  }
+
   return (
     <div className="space-y-8">
       {/* Toolbar */}
@@ -395,6 +457,7 @@ export function DispatchBoard({ dispatches, pendingRequests, vehicles, drivers }
                     driverById={driverById}
                     onApprove={handleApprove}
                     onEdit={(d) => openEditor({ dispatch: d })}
+                    onDiscard={setDiscardTarget}
                     isApproving={approvingId === dispatch.id}
                   />
                 ))}
@@ -454,6 +517,29 @@ export function DispatchBoard({ dispatches, pendingRequests, vehicles, drivers }
         prefillRequest={prefillRequest}
         onSuccess={() => setEditorOpen(false)}
       />
+
+      {/* Discard confirmation — says plainly that the trips return to the
+          unassigned queue, because that is what actually happens
+          (discardDraftDispatch frees every still-queued request back to
+          'pending' in the same transaction as the delete). */}
+      <AlertDialog open={!!discardTarget} onOpenChange={(open) => !open && setDiscardTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard this draft?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This cannot be undone. {discardTarget?.stops.length ?? 0} trip
+              {(discardTarget?.stops.length ?? 0) === 1 ? '' : 's'} will return to the unassigned
+              queue for the engine or a manual dispatch to pick up again.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep draft</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleDiscard} disabled={isDiscarding}>
+              {isDiscarding ? 'Discarding...' : 'Discard'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

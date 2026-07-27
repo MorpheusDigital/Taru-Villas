@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getProfile } from '@/lib/auth/guards'
-import { approveDispatch, getDispatchWithStops, getRequestById } from '@/lib/db/queries/dispatches'
+import {
+  approveDispatch,
+  discardDraftDispatch,
+  getDispatchWithStops,
+  getRequestById,
+} from '@/lib/db/queries/dispatches'
 import { notify } from '@/lib/fleet/push'
 import { formatDayMonth } from '@/lib/fleet/dates'
 
@@ -88,5 +93,44 @@ export async function POST(_request: NextRequest, context: RouteContext) {
   } catch (error) {
     console.error('POST /api/fleet/dispatches/[id] error:', error)
     return NextResponse.json({ error: 'Failed to approve dispatch' }, { status: 500 })
+  }
+}
+
+export async function DELETE(_request: NextRequest, context: RouteContext) {
+  try {
+    const { id } = await context.params
+    const profile = await getProfile()
+    if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
+    if (!profile.isFleetAdmin && profile.role !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    // discardDraftDispatch takes a bare id + orgId with no further scoping,
+    // so this route is the only thing standing between a fleet admin of one
+    // org and a dispatch belonging to another — same pattern as the POST
+    // handler above and requests/[id]/route.ts. 404 (not 403) for a
+    // foreign-org id, so the endpoint does not confirm the id exists.
+    const existing = await getDispatchWithStops(id)
+    if (!existing || existing.orgId !== profile.orgId) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    }
+
+    const discarded = await discardDraftDispatch(id, profile.orgId)
+    if (!discarded) {
+      // The only way to reach here with `existing` already confirmed to
+      // exist and belong to this org is a status other than 'draft' — the
+      // only status that predates 'draft' in this state machine, so any
+      // other status necessarily passed through 'approved' already.
+      return NextResponse.json(
+        { error: 'This dispatch has already been approved and cannot be discarded.' },
+        { status: 409 },
+      )
+    }
+
+    return NextResponse.json(discarded)
+  } catch (error) {
+    console.error('DELETE /api/fleet/dispatches/[id] error:', error)
+    return NextResponse.json({ error: 'Failed to discard dispatch' }, { status: 500 })
   }
 }

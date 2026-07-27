@@ -495,6 +495,67 @@ export async function createManualDispatch(
   })
 }
 
+/**
+ * Deletes a still-draft dispatch and frees its requests back to `pending`,
+ * in the same transaction — the removal path this project's ledger carries
+ * forward as a rule: whenever dispatch cancellation/removal is added, it
+ * must free its requests, or they strand permanently (stuck `queued` with
+ * no dispatch pointing at them, invisible to both the unassigned-requests
+ * list and the engine, which only ever loads `pending`/`queued`). This is
+ * the first thing to satisfy that rule.
+ *
+ * Mirrors `replaceDraftDispatches`'s own freeing step: request ids are
+ * harvested from `dispatch_stops` BEFORE the delete (not after — the FK's
+ * `onDelete: 'cascade'` means the stops are gone the instant the dispatch
+ * row is), and only a request still `status = 'queued'` is moved back to
+ * `pending` (`ne('cancelled')` alongside it, matching that function's own
+ * belt-and-braces guard) — one that independently raced to `dispatched` or
+ * was `cancelled` by its requester in the meantime is left exactly where it
+ * is, never dragged backwards.
+ *
+ * Scoped by BOTH `id` and `orgId`, and by `status = 'draft'`, in the delete's
+ * own WHERE clause — not just checked beforehand — so a concurrent approval
+ * of the same dispatch (a request racing this one) cannot be undone by a
+ * discard that was already in flight when the approval committed: whichever
+ * commits first wins, and the loser's WHERE clause simply matches nothing.
+ * Returns the deleted row, or `undefined` if the id didn't exist, belonged
+ * to another org, or was no longer a draft — the caller (the API route) is
+ * expected to turn a `undefined` into 404/409 as appropriate, not this
+ * function.
+ */
+export async function discardDraftDispatch(id: string, orgId: string) {
+  return db.transaction(async (tx) => {
+    const stops = await tx
+      .select({ requestId: dispatchStops.requestId })
+      .from(dispatchStops)
+      .where(eq(dispatchStops.dispatchId, id))
+    const requestIds = stops.map((s) => s.requestId).filter((v): v is string => v !== null)
+
+    const [deleted] = await tx
+      .delete(dispatches)
+      .where(and(eq(dispatches.id, id), eq(dispatches.orgId, orgId), eq(dispatches.status, 'draft')))
+      .returning()
+
+    if (!deleted) return undefined
+
+    if (requestIds.length > 0) {
+      await tx
+        .update(fleetRequests)
+        .set({ status: 'pending', updatedAt: new Date() })
+        .where(
+          and(
+            inArray(fleetRequests.id, requestIds),
+            eq(fleetRequests.status, 'queued'),
+            ne(fleetRequests.status, 'cancelled'),
+          ),
+        )
+        .returning()
+    }
+
+    return deleted
+  })
+}
+
 // --- Driver-facing ---------------------------------------------------------
 
 /** Dispatches a driver should see: approved or running, ending today or later. */

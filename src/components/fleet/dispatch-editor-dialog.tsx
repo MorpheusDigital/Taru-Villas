@@ -51,12 +51,16 @@ interface DispatchEditorDialogProps {
   drivers: DriverWithPush[]
   pendingRequests: FleetRequestRow[]
   /**
-   * Present when opened from an existing draft (the card's "Edit" action, or
-   * clicking its bar on the timeline) — used to prefill vehicle/driver/dates
-   * and its currently-attached requests. There is no dispatch-update API
-   * (only POST /api/fleet/dispatches to create, and POST .../[id] to
-   * approve), so submitting here always creates a NEW draft seeded from
-   * these values rather than modifying the one that was clicked.
+   * Present only when opened from an existing DRAFT (the card's "Edit"
+   * action, or clicking its bar on the timeline — never a non-draft, since
+   * neither offers this dialog for approved/in-progress/completed work) —
+   * used to prefill vehicle/driver/dates and its currently-attached
+   * requests. There is no dispatch-update API (only POST
+   * /api/fleet/dispatches to create, and DELETE .../[id] to discard a
+   * still-draft dispatch), so submitting here creates a replacement draft
+   * and then discards this one — see the create-then-discard sequencing in
+   * `onSubmit` for why that order, and what happens if the discard half
+   * fails.
    */
   dispatch?: DispatchRow | null
   /** Present when opened via "Assign manually" from a single unassigned request. */
@@ -174,6 +178,17 @@ export function DispatchEditorDialog({
   async function onSubmit(values: DispatchEditorFormValues) {
     setIsSubmitting(true)
     try {
+      // There is no dispatch-update API — only POST to create and DELETE to
+      // discard a still-draft dispatch. So "editing" an existing dispatch is
+      // done as create-then-discard, in that exact order: the replacement is
+      // created FIRST, and the original is only discarded once the
+      // replacement already exists and has committed. If creation fails, we
+      // stop here — nothing else runs, and the original dispatch (still
+      // referenced by `dispatch`, untouched by this function) is exactly as
+      // it was. The alternative order (discard first, then create) would
+      // risk losing the original's trips entirely if the create step then
+      // failed; this order's worst case is a visible duplicate the admin can
+      // discard themselves, never data that silently vanishes.
       const res = await fetch('/api/fleet/dispatches', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -190,7 +205,26 @@ export function DispatchEditorDialog({
         throw new Error(await parseErrorMessage(res, 'Failed to create dispatch'))
       }
 
-      toast.success('Dispatch created')
+      if (dispatch) {
+        // The replacement now exists — from here on we are cleaning up, not
+        // creating. A failure past this point must not read as "your edit
+        // failed": the edit already succeeded (a corrected dispatch exists,
+        // its stops attached); only the removal of the stale original is
+        // what's left, and it failing is a distinct, less urgent problem.
+        const discardRes = await fetch(`/api/fleet/dispatches/${dispatch.id}`, { method: 'DELETE' })
+        if (!discardRes.ok) {
+          toast.error(
+            `New dispatch created, but the original draft could not be removed automatically (${await parseErrorMessage(discardRes, 'unknown error')}). Discard it manually from the drafts list to avoid a duplicate.`,
+          )
+          onSuccess?.()
+          router.refresh()
+          return
+        }
+        toast.success('Dispatch updated')
+      } else {
+        toast.success('Dispatch created')
+      }
+
       onSuccess?.()
       router.refresh()
     } catch (error) {
@@ -201,6 +235,13 @@ export function DispatchEditorDialog({
   }
 
   const title = dispatch ? 'Edit Dispatch' : prefillRequest ? 'Assign Manually' : 'New Dispatch'
+  const submitLabel = dispatch
+    ? isSubmitting
+      ? 'Saving...'
+      : 'Save Changes'
+    : isSubmitting
+      ? 'Creating...'
+      : 'Create Dispatch'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -322,7 +363,7 @@ export function DispatchEditorDialog({
 
           <div className="flex justify-end gap-3 pt-2">
             <Button type="submit" disabled={isSubmitting || noEligibleDriver}>
-              {isSubmitting ? 'Creating...' : 'Create Dispatch'}
+              {submitLabel}
             </Button>
           </div>
         </form>
