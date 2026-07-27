@@ -261,7 +261,11 @@ export function formatOriginLabel(o: OriginFields): string {
     case 'head_office':
       return 'Head Office'
     case 'property':
-      return o.originPropertyName ?? 'Unknown property'
+      // trim + ||, not ??. `??` guards only null/undefined, so a property
+      // named '' or '   ' would render as a blank cell instead of falling
+      // back — and properties.name is notNull() with only a `.min(1)` Zod
+      // guard, which counts raw length and admits whitespace.
+      return o.originPropertyName?.trim() || 'Unknown property'
     case 'other':
       return o.originText?.trim() || '—'
   }
@@ -270,7 +274,7 @@ export function formatOriginLabel(o: OriginFields): string {
 /** Where a trip goes. Absorbs the ternary formerly repeated at three call sites. */
 export function formatDestinationLabel(d: DestinationFields): string {
   return d.requestType === 'visit'
-    ? (d.propertyName ?? 'Unknown property')
+    ? (d.propertyName?.trim() || 'Unknown property')
     : (d.destinationText?.trim() || '—')
 }
 
