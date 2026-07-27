@@ -52,7 +52,7 @@ interface RequestFormProps {
   request?: FleetRequestRow | null
   vehicles: Vehicle[]
   properties: Property[]
-  onSuccess: () => void
+  onSuccess?: () => void
 }
 
 export function RequestForm({ request, vehicles, properties, onSuccess }: RequestFormProps) {
@@ -66,16 +66,9 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
     control,
     watch,
     setValue,
+    getValues,
     formState: { errors },
   } = useForm<RequestFormValues>({
-    // Only the two tab-specific fields (targetPropertyId, destinationText) are
-    // ever unmounted (Radix Tabs removes the inactive TabsContent from the
-    // DOM). shouldUnregister makes RHF drop an unmounted field's value AND
-    // its validation rules entirely, so switching to "Other trip" cannot
-    // leave a stale, still-`required` targetPropertyId blocking submission.
-    // Fields outside the Tabs (dates, pax, cargo, notes) never unmount, so
-    // this has no effect on them.
-    shouldUnregister: true,
     defaultValues: {
       requestType: request?.requestType ?? 'visit',
       targetPropertyId: request?.targetPropertyId ?? '',
@@ -93,6 +86,26 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
   const requestType = watch('requestType')
   const cargoRequired = watch('cargoRequired')
   const paxCount = watch('paxCount')
+
+  // `properties` is active-only (correct for creating a new request — nobody
+  // should book a visit to a closed property). But when editing an existing
+  // request whose target property has since been deactivated, the active
+  // list alone would make the Select render its placeholder while
+  // field.value still holds the real (now-inactive) id — reading to the user
+  // as "my property selection was lost". Append that one property back in
+  // so the trigger shows the correct name; its own name comes from the
+  // request row's already-joined propertyName if it's missing here.
+  const visitPropertyOptions = useMemo(() => {
+    if (!request?.targetPropertyId) return properties
+    if (properties.some((p) => p.id === request.targetPropertyId)) return properties
+    return [
+      ...properties,
+      {
+        id: request.targetPropertyId,
+        name: request.propertyName ?? 'Inactive property',
+      } as Property,
+    ]
+  }, [properties, request])
 
   // Mapped exactly like src/app/api/fleet/requests/route.ts maps listVehicles()
   // rows before calling validateFleetRequest — same function, same shape, so
@@ -196,7 +209,7 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
                     <SelectValue placeholder="Select a property" />
                   </SelectTrigger>
                   <SelectContent>
-                    {properties.map((p) => (
+                    {visitPropertyOptions.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
                         {p.name}
                       </SelectItem>
@@ -212,7 +225,12 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
 
           <div className="space-y-2">
             <Label htmlFor="request-purpose">Purpose</Label>
-            <Textarea id="request-purpose" placeholder="Optional" {...register('purpose')} />
+            <Textarea
+              id="request-purpose"
+              placeholder="Optional"
+              maxLength={1000}
+              {...register('purpose')}
+            />
           </div>
         </TabsContent>
 
@@ -222,6 +240,7 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
             <Input
               id="request-origin"
               placeholder="e.g. Head Office"
+              maxLength={500}
               {...register('originText')}
             />
           </div>
@@ -230,6 +249,7 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
             <Input
               id="request-destination"
               placeholder="e.g. Bandaranaike Airport"
+              maxLength={500}
               {...register('destinationText', { required: 'Destination is required' })}
             />
             {errors.destinationText && (
@@ -256,7 +276,16 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
           <Input
             id="request-end"
             type="date"
-            {...register('endDate', { required: 'End date is required' })}
+            {...register('endDate', {
+              required: 'End date is required',
+              // Mirrors the POST route's Zod `.refine` (and the PATCH route's
+              // identical imperative check) word-for-word, so a transposed
+              // date is caught here instead of round-tripping to a bare
+              // "Validation failed" toast with the real reason buried in
+              // `details`, which parseErrorMessage doesn't read.
+              validate: (v) =>
+                !v || v >= getValues('startDate') || 'End date cannot be before the start date',
+            })}
           />
           {errors.endDate && <p className="text-sm text-destructive">{errors.endDate.message}</p>}
         </div>
@@ -268,10 +297,12 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
           id="request-pax"
           type="number"
           min={0}
+          max={60}
           {...register('paxCount', {
             required: 'Passenger count is required',
             valueAsNumber: true,
             min: { value: 0, message: 'Must be 0 or more' },
+            max: { value: 60, message: 'Must be 60 or fewer' },
             // A cleared input yields NaN from valueAsNumber, which is not ''
             // so `required` alone doesn't catch it — see the identical
             // comment in vehicles-client.tsx's maxPassengers field.
@@ -303,7 +334,12 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
 
       <div className="space-y-2">
         <Label htmlFor="request-notes">Notes</Label>
-        <Textarea id="request-notes" placeholder="Optional" {...register('notes')} />
+        <Textarea
+          id="request-notes"
+          placeholder="Optional"
+          maxLength={2000}
+          {...register('notes')}
+        />
       </div>
 
       <div className="flex justify-end gap-3 pt-2">
