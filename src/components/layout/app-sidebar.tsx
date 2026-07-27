@@ -20,6 +20,9 @@ import {
   Trash2,
   UserCheck,
   Package,
+  Truck,
+  CalendarClock,
+  Route,
 } from 'lucide-react'
 
 import { useAuth } from '@/components/providers/auth-provider'
@@ -70,6 +73,8 @@ const mainNavItems: NavItem[] = [
   { title: 'Utilities', href: '/utilities', icon: Gauge },
   { title: 'Daily Wastage', href: '/waste', icon: Trash2 },
   { title: 'Asset Registry', href: '/assets', icon: Package },
+  { title: 'Fleet', href: '/fleet', icon: Truck },
+  { title: 'Dispatch', href: '/fleet/dispatch', icon: CalendarClock },
   { title: 'Settings', href: '/settings', icon: Settings },
 ]
 
@@ -83,6 +88,9 @@ const adminNavItems: NavItem[] = [
   { title: 'Property Settings', href: '/admin/properties', icon: Building2 },
   { title: 'Users', href: '/admin/users', icon: Users },
   { title: 'Allowed Emails', href: '/admin/allowed-emails', icon: ShieldCheck },
+  { title: 'Vehicles', href: '/admin/fleet/vehicles', icon: Truck },
+  { title: 'Drivers', href: '/admin/fleet/drivers', icon: Users },
+  { title: 'Distances', href: '/admin/fleet/distances', icon: Route },
 ]
 
 // ---------------------------------------------------------------------------
@@ -123,6 +131,9 @@ export function AppSidebar() {
     if (href === '/sops') {
       return pathname === '/sops'
     }
+    if (href === '/fleet') {
+      return pathname === '/fleet'
+    }
     return pathname.startsWith(href)
   }
 
@@ -138,9 +149,14 @@ export function AppSidebar() {
     profile.role === 'property_manager' || profile.role === 'admin'
   const showAdminSection = profile.role === 'admin'
 
+  const isFleetAdmin = profile.isFleetAdmin || profile.role === 'admin'
+  const canSeeFleet = profile.canBookFleet || isFleetAdmin
+
   const visibleMainNavItems = mainNavItems.filter((item) => {
     if (item.href === '/dashboard') return showAdminSection
     if (item.href === '/issues') return showIssuesNav
+    if (item.href === '/fleet') return canSeeFleet
+    if (item.href === '/fleet/dispatch') return isFleetAdmin
     return true
   })
 

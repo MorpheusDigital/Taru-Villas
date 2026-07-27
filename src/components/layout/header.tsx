@@ -34,6 +34,11 @@ const segmentLabels: Record<string, string> = {
   'guest-profiles': 'Guest Profiles',
   tasks: 'Task Manager',
   teams: 'Teams',
+  fleet: 'Fleet',
+  dispatch: 'Dispatch',
+  vehicles: 'Vehicles',
+  drivers: 'Drivers',
+  distances: 'Distances',
 }
 
 function getPageTitle(pathname: string): string {
