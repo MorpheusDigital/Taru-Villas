@@ -38,6 +38,7 @@ async function parseErrorMessage(res: Response, fallback: string): Promise<strin
 interface RequestFormValues {
   requestType: 'visit' | 'standalone'
   targetPropertyId: string
+  originSelection: string
   originText: string
   destinationText: string
   startDate: string
@@ -72,6 +73,10 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
     defaultValues: {
       requestType: request?.requestType ?? 'visit',
       targetPropertyId: request?.targetPropertyId ?? '',
+      originSelection:
+        request?.originKind === 'property' && request.originPropertyId
+          ? `prop:${request.originPropertyId}`
+          : (request?.originKind ?? 'head_office'),
       originText: request?.originText ?? '',
       destinationText: request?.destinationText ?? '',
       startDate: request?.startDate ?? '',
@@ -86,6 +91,7 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
   const requestType = watch('requestType')
   const cargoRequired = watch('cargoRequired')
   const paxCount = watch('paxCount')
+  const originSelection = watch('originSelection')
 
   // `properties` is active-only (correct for creating a new request — nobody
   // should book a visit to a closed property). But when editing an existing
@@ -136,8 +142,17 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
       const body = {
         requestType: values.requestType,
         targetPropertyId: values.requestType === 'visit' ? values.targetPropertyId : null,
+        originKind:
+          values.originSelection === 'head_office'
+            ? ('head_office' as const)
+            : values.originSelection === 'other'
+              ? ('other' as const)
+              : ('property' as const),
+        originPropertyId: values.originSelection.startsWith('prop:')
+          ? values.originSelection.slice('prop:'.length)
+          : null,
         originText:
-          values.requestType === 'standalone' ? (values.originText.trim() || null) : null,
+          values.originSelection === 'other' ? (values.originText.trim() || null) : null,
         destinationText:
           values.requestType === 'standalone' ? (values.destinationText.trim() || null) : null,
         startDate: values.startDate,
@@ -244,15 +259,6 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
 
         <TabsContent value="standalone" className="space-y-5 pt-4">
           <div className="space-y-2">
-            <Label htmlFor="request-origin">Origin</Label>
-            <Input
-              id="request-origin"
-              placeholder="e.g. Head Office"
-              maxLength={500}
-              {...register('originText')}
-            />
-          </div>
-          <div className="space-y-2">
             <Label htmlFor="request-destination">Destination</Label>
             <Input
               id="request-destination"
@@ -284,6 +290,55 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
           </div>
         </TabsContent>
       </Tabs>
+
+      <div className="space-y-2">
+        <Label>Pick-up</Label>
+        <Controller
+          control={control}
+          name="originSelection"
+          render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="head_office">Head Office</SelectItem>
+                {visitPropertyOptions.map((p) => (
+                  <SelectItem key={p.id} value={`prop:${p.id}`}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+                <SelectItem value="other">Other…</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        />
+      </div>
+
+      {originSelection === 'other' && (
+        <div className="space-y-2">
+          <Label htmlFor="request-origin-text">Pick-up location</Label>
+          <Input
+            id="request-origin-text"
+            placeholder="e.g. Bandaranaike Airport"
+            maxLength={500}
+            // Scoped with validate, never a bare `required`. register() runs
+            // while this element's props are evaluated, and RHF keeps the rule
+            // once registered — so a bare required here would fire while the
+            // field is hidden, blocking submit with its message off screen.
+            // That is exactly the defect fixed in e808935.
+            {...register('originText', {
+              validate: (v) =>
+                getValues('originSelection') !== 'other' ||
+                Boolean(v?.trim()) ||
+                'Enter a pick-up location',
+            })}
+          />
+          {errors.originText && (
+            <p className="text-sm text-destructive">{errors.originText.message}</p>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
