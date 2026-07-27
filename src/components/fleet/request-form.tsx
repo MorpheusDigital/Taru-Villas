@@ -94,23 +94,39 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
   const originSelection = watch('originSelection')
 
   // `properties` is active-only (correct for creating a new request — nobody
-  // should book a visit to a closed property). But when editing an existing
-  // request whose target property has since been deactivated, the active
-  // list alone would make the Select render its placeholder while
-  // field.value still holds the real (now-inactive) id — reading to the user
-  // as "my property selection was lost". Append that one property back in
-  // so the trigger shows the correct name; its own name comes from the
-  // request row's already-joined propertyName if it's missing here.
+  // should book a visit to a closed property). This same list also backs the
+  // Pick-up Select below, and editing an existing request can involve TWO
+  // property ids that may have since been deactivated: the visit's target
+  // property AND its pick-up property. The active list alone would then
+  // make Radix's controlled Select find no matching item for whichever one
+  // is missing, rendering blank — reading to the user as "my selection was
+  // lost" (and for Pick-up specifically, silently inviting them to overwrite
+  // a real saved location with the next choice they make). Append back
+  // whichever of the two ids aren't already in `properties`, de-duplicated
+  // against `properties` and against each other (the same property can be
+  // both target and origin). Names come from the request row's
+  // already-joined propertyName / originPropertyName when available.
   const visitPropertyOptions = useMemo(() => {
-    if (!request?.targetPropertyId) return properties
-    if (properties.some((p) => p.id === request.targetPropertyId)) return properties
-    return [
-      ...properties,
-      {
+    const seen = new Set(properties.map((p) => p.id))
+    const missing: Property[] = []
+
+    if (request?.targetPropertyId && !seen.has(request.targetPropertyId)) {
+      missing.push({
         id: request.targetPropertyId,
         name: request.propertyName ?? 'Inactive property',
-      } as Property,
-    ]
+      } as Property)
+      seen.add(request.targetPropertyId)
+    }
+
+    if (request?.originPropertyId && !seen.has(request.originPropertyId)) {
+      missing.push({
+        id: request.originPropertyId,
+        name: request.originPropertyName ?? 'Inactive property',
+      } as Property)
+      seen.add(request.originPropertyId)
+    }
+
+    return missing.length ? [...properties, ...missing] : properties
   }, [properties, request])
 
   // Mapped exactly like src/app/api/fleet/requests/route.ts maps listVehicles()
@@ -299,7 +315,7 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
           render={({ field }) => (
             <Select value={field.value} onValueChange={field.onChange}>
               <SelectTrigger className="w-full">
-                <SelectValue />
+                <SelectValue placeholder="Select a pick-up point" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="head_office">Head Office</SelectItem>
