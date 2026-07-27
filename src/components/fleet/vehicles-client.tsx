@@ -319,6 +319,11 @@ function VehicleForm({ vehicle, properties, onSuccess }: VehicleFormProps) {
             required: 'Seats is required',
             valueAsNumber: true,
             min: { value: 0, message: 'Must be 0 or more' },
+            // A cleared input yields NaN from valueAsNumber. NaN is not ''
+            // so RHF's `required` check alone lets it through, and it would
+            // otherwise serialise as JSON null and fail the API's Zod schema
+            // with a confusing "Validation failed". Catch it explicitly.
+            validate: (v) => !Number.isNaN(v) || 'Seats is required',
           })}
         />
         {errors.maxPassengers && (
@@ -405,7 +410,14 @@ function VehicleForm({ vehicle, properties, onSuccess }: VehicleFormProps) {
         <Input
           id="vehicle-sort-order"
           type="number"
-          {...register('sortOrder', { valueAsNumber: true })}
+          {...register('sortOrder', {
+            // sortOrder is not nullable server-side, and a blank field has
+            // no meaningful "unset" state distinct from 0 — clearing it
+            // just means "back to the default", so coerce the empty string
+            // to 0 explicitly rather than letting valueAsNumber send NaN
+            // (which serialises as JSON null and fails the API schema).
+            setValueAs: (v) => (v === '' ? 0 : Number(v)),
+          })}
         />
       </div>
 

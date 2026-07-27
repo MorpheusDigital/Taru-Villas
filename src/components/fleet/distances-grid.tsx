@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Check } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Input } from '@/components/ui/input'
@@ -17,6 +18,11 @@ import type { Property } from '@/lib/db/schema'
 import type { listDistances } from '@/lib/db/queries/fleet'
 
 type Distance = Awaited<ReturnType<typeof listDistances>>[number]
+
+// Matches the API's z.number().min(0).max(2000) in
+// src/app/api/fleet/distances/route.ts — checked client-side too so a typo
+// gets an immediate, specific message instead of a round-trip 400.
+const MAX_DISTANCE_KM = 2000
 
 interface DistancesGridProps {
   distances: Distance[]
@@ -86,7 +92,11 @@ export function DistancesGrid({ distances, properties }: DistancesGridProps) {
       throw new Error(await parseErrorMessage(res, 'Failed to save distance'))
     }
 
-    toast.success('Saved')
+    // No toast here — an admin filling in the whole grid in one sitting can
+    // save dozens of cells in a row (11x11 = up to ~55 pairs), and a
+    // stacked "Saved" toast per cell is noise, not feedback. DistanceCell
+    // shows a quiet inline checkmark instead. router.refresh() re-syncs
+    // every cell with the authoritative server value.
     router.refresh()
   }
 
@@ -140,6 +150,7 @@ export function DistancesGrid({ distances, properties }: DistancesGridProps) {
                         <DistanceCell
                           value={km}
                           onSave={(value) => handleSave(rowNode.id, colNode.id, value)}
+                          ariaLabel={`Distance from ${rowNode.name} to ${colNode.name} in kilometres`}
                         />
                       </TableCell>
                     )
@@ -173,16 +184,32 @@ export function DistancesGrid({ distances, properties }: DistancesGridProps) {
 function DistanceCell({
   value,
   onSave,
+  ariaLabel,
 }: {
   value: number | null
   onSave: (km: number) => Promise<void>
+  ariaLabel: string
 }) {
+  // Seeded once from the server-provided value at mount, then left alone.
+  // Deliberately NOT kept in sync via a useEffect on `value`: saving any
+  // *other* cell in the grid calls router.refresh(), which re-renders every
+  // cell with fresh props, and an effect keyed on the incoming value would
+  // stomp on whatever the admin is mid-typing here. The success and failure
+  // paths below already update `draft` directly from the outcome of this
+  // cell's own save, so local state stays correct without ever needing to
+  // resync from props — it survives any number of unrelated refreshes.
   const [draft, setDraft] = useState(value !== null ? String(value) : '')
   const [isSaving, setIsSaving] = useState(false)
+  const [justSaved, setJustSaved] = useState(false)
 
+  // Auto-clears the quiet "saved" indicator — see the toast-noise note on
+  // handleSave in the parent: dozens of per-cell saves in one sitting
+  // should not stack dozens of toasts, so success is shown inline instead.
   useEffect(() => {
-    setDraft(value !== null ? String(value) : '')
-  }, [value])
+    if (!justSaved) return
+    const timer = setTimeout(() => setJustSaved(false), 1500)
+    return () => clearTimeout(timer)
+  }, [justSaved])
 
   async function handleBlur() {
     const trimmed = draft.trim()
@@ -202,11 +229,21 @@ function DistanceCell({
       return
     }
 
+    // No-op if nothing actually changed — checked before the max-distance
+    // validation so simply tabbing through an already-saved cell can never
+    // surface a spurious error.
     if (value !== null && parsed === value) return
+
+    if (parsed > MAX_DISTANCE_KM) {
+      toast.error(`Distance must be ${MAX_DISTANCE_KM} km or less`)
+      setDraft(value !== null ? String(value) : '')
+      return
+    }
 
     setIsSaving(true)
     try {
       await onSave(parsed)
+      setJustSaved(true)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to save distance')
       setDraft(value !== null ? String(value) : '')
@@ -216,16 +253,26 @@ function DistanceCell({
   }
 
   return (
-    <Input
-      type="number"
-      min={0}
-      step="0.1"
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={handleBlur}
-      disabled={isSaving}
-      placeholder="—"
-      className="mx-auto h-8 w-20 text-center"
-    />
+    <div className="mx-auto flex w-24 items-center justify-center gap-1">
+      <Input
+        type="number"
+        min={0}
+        max={MAX_DISTANCE_KM}
+        step="0.1"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={handleBlur}
+        disabled={isSaving}
+        placeholder="—"
+        aria-label={ariaLabel}
+        className="h-8 w-20 text-center"
+      />
+      <Check
+        className={`size-3.5 shrink-0 text-emerald-600 transition-opacity ${
+          justSaved ? 'opacity-100' : 'opacity-0'
+        }`}
+        aria-hidden="true"
+      />
+    </div>
   )
 }
