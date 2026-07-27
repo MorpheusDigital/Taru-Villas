@@ -30,6 +30,14 @@ export async function listRequests(
       requestType: fleetRequests.requestType,
       requestedBy: fleetRequests.requestedBy,
       requesterName: profiles.fullName,
+      // Needed client-side by the dispatch editor's mirror of
+      // validateVehicleForCluster's restricted-vehicle rule — without it,
+      // the UI cannot tell whether attaching this request to a restricted
+      // vehicle would be refused by the server, and the licence-style
+      // "don't offer what the server will refuse" pattern used for driver
+      // eligibility can't be applied to this rule too. profiles is already
+      // joined below for requesterName, so this is a zero-cost addition.
+      requesterCanUseRestricted: profiles.canUseRestrictedVehicles,
       targetPropertyId: fleetRequests.targetPropertyId,
       propertyName: properties.name,
       originText: fleetRequests.originText,
@@ -89,6 +97,34 @@ function isDiscardableEngineDraft() {
   // the `!` just satisfies its general `SQL | undefined` signature so this
   // can be passed to `not()`, which requires a non-undefined SQLWrapper.
   return and(eq(dispatches.status, 'draft'), eq(dispatches.generatedBy, 'engine'))!
+}
+
+/** The transaction type `db.transaction()`'s callback receives, extracted
+ *  rather than hand-written so it can never drift from what `db` actually
+ *  produces. */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
+
+/**
+ * Frees requests still `status = 'queued'` back to `pending`, inside an
+ * already-open transaction. Extracted so `replaceDraftDispatches`,
+ * `discardDraftDispatch`, and `updateDraftDispatch` — the three places that
+ * can each detach a request from a dispatch — cannot independently drift on
+ * what "safe to free" means. Per this project's own history, three call
+ * sites quietly agreeing on the same rule is exactly the shape that has
+ * produced defects here before.
+ *
+ * The `eq(status, 'queued')` guard is the whole point: a request that raced
+ * to `dispatched` (approved elsewhere) or was independently `cancelled` by
+ * its requester is left exactly where it is, never dragged back to
+ * `pending`. A no-op (issues no query) when `requestIds` is empty.
+ */
+async function freeQueuedRequests(tx: Tx, requestIds: string[]) {
+  if (requestIds.length === 0) return
+  await tx
+    .update(fleetRequests)
+    .set({ status: 'pending', updatedAt: new Date() })
+    .where(and(inArray(fleetRequests.id, requestIds), eq(fleetRequests.status, 'queued')))
+    .returning()
 }
 
 /** Gathers everything planDispatches() needs, converting numerics to numbers. */
@@ -237,13 +273,7 @@ export async function replaceDraftDispatches(orgId: string, result: EngineResult
         .from(dispatchStops)
         .where(inArray(dispatchStops.dispatchId, ids))
       const freedIds = freed.map((f) => f.requestId).filter((v): v is string => v !== null)
-      if (freedIds.length > 0) {
-        await tx
-          .update(fleetRequests)
-          .set({ status: 'pending', updatedAt: new Date() })
-          .where(and(inArray(fleetRequests.id, freedIds), eq(fleetRequests.status, 'queued')))
-          .returning()
-      }
+      await freeQueuedRequests(tx, freedIds)
       // Re-apply isDiscardableEngineDraft() at DELETE time, not just at the
       // SELECT above: under READ COMMITTED, a concurrent approveDispatch()
       // that commits in the gap between the SELECT and this DELETE would
@@ -371,6 +401,11 @@ export async function listDispatches(
       paxCount: fleetRequests.paxCount,
       cargoRequired: fleetRequests.cargoRequired,
       requesterName: profiles.fullName,
+      // Same addition as listRequests, same reason: lets the dispatch
+      // editor mirror validateVehicleForCluster's restricted-vehicle rule
+      // against a dispatch's OWN currently-attached stops, not just the
+      // pending requests available to add.
+      requesterCanUseRestricted: profiles.canUseRestrictedVehicles,
     })
     .from(dispatchStops)
     .leftJoin(properties, eq(dispatchStops.propertyId, properties.id))
@@ -538,21 +573,140 @@ export async function discardDraftDispatch(id: string, orgId: string) {
 
     if (!deleted) return undefined
 
-    if (requestIds.length > 0) {
+    await freeQueuedRequests(tx, requestIds)
+
+    return deleted
+  })
+}
+
+/**
+ * Updates a still-draft dispatch's vehicle/driver/dates/notes and reconciles
+ * its attached requests against a new desired set — the real edit path a
+ * draft needs, in place of the create-then-discard workaround this
+ * component used before this function existed. That workaround seeded its
+ * "requests to attach" list by intersecting the dispatch's stops with
+ * `listRequests(orgId, { status: 'pending' })`, but a draft's own attached
+ * requests are always `queued`, never `pending` — the intersection was
+ * therefore always empty, so every "edit" silently detached all of a
+ * dispatch's trips. This function exists specifically to close that.
+ *
+ * Three request buckets, computed once against the dispatch's CURRENT stops:
+ *  - dropped (currently attached, not in the new set): their stops are
+ *    deleted and `freeQueuedRequests` returns them to `pending` if they're
+ *    still `queued` (never if they raced to `dispatched`/`cancelled`).
+ *  - added (in the new set, not currently attached): a fresh stop is
+ *    inserted for each (scoped to `orgId`, excluding `cancelled` — same
+ *    guard `createManualDispatch` uses for its own attach step) and their
+ *    status is set to `queued`.
+ *  - staying (in both): completely untouched — no stop deleted and
+ *    reinserted, no status write of any kind. This is deliberate, not an
+ *    optimisation: routing a staying request through
+ *    free-then-requeue would open the exact window where a concurrent
+ *    `approveDispatch()` or a second manual dispatch could grab it while it
+ *    was transiently `pending`, which is how a request ends up attached to
+ *    two live dispatches at once.
+ *
+ * Same status/org guard as `discardDraftDispatch`, inside the UPDATE's own
+ * WHERE rather than checked beforehand, so a racing `approveDispatch()`
+ * wins cleanly — this simply returns `undefined` rather than overwriting an
+ * already-approved dispatch's vehicle/driver/dates out from under it.
+ */
+export async function updateDraftDispatch(
+  id: string,
+  orgId: string,
+  data: {
+    vehicleId: string
+    driverId: string
+    startDate: string
+    endDate: string
+    requestIds: string[]
+    notes?: string | null
+  },
+) {
+  return db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(dispatches)
+      .set({
+        vehicleId: data.vehicleId,
+        driverId: data.driverId,
+        startDate: data.startDate,
+        endDate: data.endDate,
+        notes: data.notes ?? null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(dispatches.id, id), eq(dispatches.orgId, orgId), eq(dispatches.status, 'draft')))
+      .returning()
+
+    if (!updated) return undefined
+
+    const currentStops = await tx
+      .select({ requestId: dispatchStops.requestId, sortOrder: dispatchStops.sortOrder })
+      .from(dispatchStops)
+      .where(eq(dispatchStops.dispatchId, id))
+
+    const currentRequestIds = new Set(
+      currentStops.map((s) => s.requestId).filter((v): v is string => v !== null),
+    )
+    const desiredRequestIds = new Set(data.requestIds)
+
+    const toRemove = [...currentRequestIds].filter((rid) => !desiredRequestIds.has(rid))
+    const toAdd = [...desiredRequestIds].filter((rid) => !currentRequestIds.has(rid))
+    // Anything in both sets (the intersection) stays attached and is never
+    // referenced by either branch below — see the function-level comment
+    // for why that has to be true, not just convenient.
+
+    if (toRemove.length > 0) {
       await tx
-        .update(fleetRequests)
-        .set({ status: 'pending', updatedAt: new Date() })
+        .delete(dispatchStops)
+        .where(and(eq(dispatchStops.dispatchId, id), inArray(dispatchStops.requestId, toRemove)))
+        .returning()
+      await freeQueuedRequests(tx, toRemove)
+    }
+
+    if (toAdd.length > 0) {
+      const requestsToAdd = await tx
+        .select()
+        .from(fleetRequests)
         .where(
           and(
-            inArray(fleetRequests.id, requestIds),
-            eq(fleetRequests.status, 'queued'),
+            inArray(fleetRequests.id, toAdd),
+            eq(fleetRequests.orgId, orgId),
             ne(fleetRequests.status, 'cancelled'),
           ),
         )
-        .returning()
+
+      // Can come back shorter than `toAdd` if an id was foreign-org or
+      // already cancelled — guard both writes below so neither is ever
+      // called with an empty list.
+      if (requestsToAdd.length > 0) {
+        const nextSortOrder = currentStops.reduce((max, s) => Math.max(max, s.sortOrder), -1) + 1
+        await tx
+          .insert(dispatchStops)
+          .values(
+            requestsToAdd.map((r, i) => ({
+              dispatchId: id,
+              requestId: r.id,
+              propertyId: r.targetPropertyId,
+              label: r.destinationText,
+              sortOrder: nextSortOrder + i,
+            })),
+          )
+          .returning()
+
+        await tx
+          .update(fleetRequests)
+          .set({ status: 'queued', updatedAt: new Date() })
+          .where(
+            and(
+              inArray(fleetRequests.id, requestsToAdd.map((r) => r.id)),
+              ne(fleetRequests.status, 'cancelled'),
+            ),
+          )
+          .returning()
+      }
     }
 
-    return deleted
+    return updated
   })
 }
 

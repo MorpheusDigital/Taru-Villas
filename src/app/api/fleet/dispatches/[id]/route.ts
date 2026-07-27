@@ -1,17 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import { getProfile } from '@/lib/auth/guards'
 import {
   approveDispatch,
   discardDraftDispatch,
   getDispatchWithStops,
   getRequestById,
+  updateDraftDispatch,
 } from '@/lib/db/queries/dispatches'
+import { validateManualDispatchInput } from '@/lib/fleet/dispatch-validation'
 import { notify } from '@/lib/fleet/push'
 import { formatDayMonth } from '@/lib/fleet/dates'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://tvpl.morpheusds.com'
+
+const updateSchema = z.object({
+  vehicleId: z.string().uuid(),
+  driverId: z.string().uuid(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  requestIds: z.array(z.string().uuid()).default([]),
+  notes: z.string().max(2000).nullable().optional(),
+})
+
+/**
+ * `discardDraftDispatch`/`updateDraftDispatch` returning `undefined` is
+ * ambiguous on its own: it means either "this id no longer resolves to
+ * anything" (a concurrent discard, or a run-engine rebuild, deleted it in
+ * the gap between this route's up-front existence check and the write
+ * below) or "it still exists, just not as a draft anymore" (a concurrent
+ * approval won the race). Those need different status codes — 404 for the
+ * first (the id genuinely doesn't resolve to anything), 409 for the second
+ * (it resolves to something, just not something this action can touch) —
+ * so this re-checks existence once more before choosing.
+ */
+async function goneOrNotDraft(id: string, orgId: string, action: 'discarded' | 'edited') {
+  const stillThere = await getDispatchWithStops(id)
+  if (!stillThere || stillThere.orgId !== orgId) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+  return NextResponse.json(
+    { error: `Only a draft dispatch can be ${action} — this one has already been approved.` },
+    { status: 409 },
+  )
+}
 
 export async function POST(_request: NextRequest, context: RouteContext) {
   try {
@@ -118,19 +152,77 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
 
     const discarded = await discardDraftDispatch(id, profile.orgId)
     if (!discarded) {
-      // The only way to reach here with `existing` already confirmed to
-      // exist and belong to this org is a status other than 'draft' — the
-      // only status that predates 'draft' in this state machine, so any
-      // other status necessarily passed through 'approved' already.
-      return NextResponse.json(
-        { error: 'This dispatch has already been approved and cannot be discarded.' },
-        { status: 409 },
-      )
+      return goneOrNotDraft(id, profile.orgId, 'discarded')
     }
 
     return NextResponse.json(discarded)
   } catch (error) {
     console.error('DELETE /api/fleet/dispatches/[id] error:', error)
     return NextResponse.json({ error: 'Failed to discard dispatch' }, { status: 500 })
+  }
+}
+
+export async function PATCH(request: NextRequest, context: RouteContext) {
+  try {
+    const { id } = await context.params
+    const profile = await getProfile()
+    if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
+    if (!profile.isFleetAdmin && profile.role !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    const parsed = updateSchema.safeParse(await request.json().catch(() => null))
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: parsed.error.flatten().fieldErrors },
+        { status: 400 },
+      )
+    }
+    if (parsed.data.endDate < parsed.data.startDate) {
+      return NextResponse.json({ error: 'End date cannot be before the start date' }, { status: 400 })
+    }
+
+    // Same org-ownership pattern as POST/DELETE above: 404, not 403, for a
+    // foreign-org id, so the endpoint does not confirm the id exists.
+    const existing = await getDispatchWithStops(id)
+    if (!existing || existing.orgId !== profile.orgId) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    }
+    if (existing.status !== 'draft') {
+      return NextResponse.json(
+        { error: 'Only a draft dispatch can be edited — this one has already been approved.' },
+        { status: 409 },
+      )
+    }
+
+    // The exact same rules POST /api/fleet/dispatches runs before creating
+    // a dispatch — org/active/licence on the vehicle+driver pairing, and
+    // capacity/cargo/restricted-access on the vehicle against the requests
+    // that will end up attached. Without this, PATCH would be the one
+    // manual path that lets a fleet admin move a dispatch onto a
+    // vehicle/driver pairing (or an overloaded vehicle) the create route
+    // already refuses — the same class of drift the run-engine/manual-
+    // create split had to be closed for earlier in this feature.
+    const validation = await validateManualDispatchInput(profile.orgId, parsed.data)
+    if (!validation.ok) {
+      return NextResponse.json({ error: validation.error }, { status: validation.status })
+    }
+
+    const updated = await updateDraftDispatch(id, profile.orgId, {
+      ...parsed.data,
+      notes: parsed.data.notes ?? null,
+    })
+    if (!updated) {
+      // A concurrent approval/discard won the race between the checks
+      // above and this write — caught at the transaction boundary instead
+      // of the up-front status check.
+      return goneOrNotDraft(id, profile.orgId, 'edited')
+    }
+
+    return NextResponse.json(updated)
+  } catch (error) {
+    console.error('PATCH /api/fleet/dispatches/[id] error:', error)
+    return NextResponse.json({ error: 'Failed to update dispatch' }, { status: 500 })
   }
 }

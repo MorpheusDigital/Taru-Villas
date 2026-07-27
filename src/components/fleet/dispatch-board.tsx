@@ -151,14 +151,10 @@ function Timeline({
                       'h-8 truncate rounded-md border px-2 text-left text-xs font-medium',
                       barColors[d.status],
                     )
-                    // Only a draft can be reassigned (there is no API to
-                    // update or discard an approved/in-progress/completed
-                    // dispatch) — a non-draft bar is not clickable, rather
-                    // than opening an editor whose submit would only ever
-                    // create an unrelated duplicate. See dispatch-editor-
-                    // dialog.tsx's "Edit" flow for why a draft bar's click
-                    // is safe: it creates a replacement and then discards
-                    // the original, never leaving a silent duplicate.
+                    // Only a draft can be reassigned — updateDraftDispatch
+                    // (PATCH .../[id]) only ever succeeds against a draft,
+                    // so a non-draft bar is not clickable rather than
+                    // opening an editor whose submit is guaranteed to 409.
                     const clickable = d.status === 'draft'
 
                     return (
@@ -210,6 +206,7 @@ function DraftCard({
   onEdit,
   onDiscard,
   isApproving,
+  isDiscarding,
 }: {
   dispatch: DispatchRow
   driverById: Map<string, DriverWithPush>
@@ -217,6 +214,7 @@ function DraftCard({
   onEdit: (dispatch: DispatchRow) => void
   onDiscard: (dispatch: DispatchRow) => void
   isApproving: boolean
+  isDiscarding: boolean
 }) {
   const driver = driverById.get(dispatch.driverId)
 
@@ -263,6 +261,7 @@ function DraftCard({
             size="sm"
             className="text-destructive hover:text-destructive"
             onClick={() => onDiscard(dispatch)}
+            disabled={isDiscarding}
           >
             <Trash2 className="size-3.5" />
             Discard
@@ -459,6 +458,7 @@ export function DispatchBoard({ dispatches, pendingRequests, vehicles, drivers }
                     onEdit={(d) => openEditor({ dispatch: d })}
                     onDiscard={setDiscardTarget}
                     isApproving={approvingId === dispatch.id}
+                    isDiscarding={isDiscarding && discardTarget?.id === dispatch.id}
                   />
                 ))}
               </div>
