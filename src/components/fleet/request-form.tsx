@@ -202,7 +202,15 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
             <Controller
               control={control}
               name="targetPropertyId"
-              rules={{ required: 'Select a property' }}
+              // Scoped to the mode it belongs to rather than a bare `required`,
+              // for the reason spelled out on destinationText below: a rule
+              // attached to a field in one tab must not be able to block a
+              // submit made from the other, where its error message is not on
+              // screen. Mirrors the POST route's `.refine` on requestType.
+              rules={{
+                validate: (v) =>
+                  getValues('requestType') !== 'visit' || Boolean(v) || 'Select a property',
+              }}
               render={({ field }) => (
                 <Select value={field.value} onValueChange={field.onChange}>
                   <SelectTrigger className="w-full">
@@ -250,7 +258,25 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
               id="request-destination"
               placeholder="e.g. Bandaranaike Airport"
               maxLength={500}
-              {...register('destinationText', { required: 'Destination is required' })}
+              // NOT a bare `required`. register() runs while this element's
+              // props are evaluated, which React does on every render of this
+              // component — including renders where Radix never mounts this
+              // tab's panel. RHF therefore holds the rule permanently (each
+              // re-register sets mount: true again), so a `required` here also
+              // fires on the "Property visit" tab, where this input and the
+              // error paragraph below are both off screen. The result is a
+              // Submit Request button that silently does nothing: handleSubmit
+              // fails validation, onSubmit never runs, and the reason is
+              // rendered inside a panel the user cannot see. Scoping the rule
+              // to standalone mode — mirroring the POST route's own
+              // `.refine((d) => d.requestType !== 'standalone' || ...)` —
+              // keeps it enforced where it applies and inert where it does not.
+              {...register('destinationText', {
+                validate: (v) =>
+                  getValues('requestType') !== 'standalone' ||
+                  Boolean(v?.trim()) ||
+                  'Destination is required',
+              })}
             />
             {errors.destinationText && (
               <p className="text-sm text-destructive">{errors.destinationText.message}</p>
