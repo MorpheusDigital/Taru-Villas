@@ -1512,6 +1512,11 @@ export const dispatchStatusEnum = pgEnum('dispatch_status', [
 ])
 export const vehicleStatusEnum = pgEnum('vehicle_status', ['active', 'maintenance', 'retired'])
 export const driverLanguageEnum = pgEnum('driver_language', ['en', 'si', 'ta'])
+export const fleetOriginKindEnum = pgEnum('fleet_origin_kind', [
+  'head_office',
+  'property',
+  'other',
+])
 
 export const vehicles = pgTable('vehicles', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -1575,6 +1580,8 @@ export const fleetRequests = pgTable('fleet_requests', {
   requestedBy: uuid('requested_by').notNull().references(() => profiles.id),
   targetPropertyId: uuid('target_property_id').references(() => properties.id, { onDelete: 'set null' }),
   originText: text('origin_text'),
+  originKind: fleetOriginKindEnum('origin_kind').default('head_office').notNull(),
+  originPropertyId: uuid('origin_property_id').references(() => properties.id, { onDelete: 'set null' }),
   destinationText: text('destination_text'),
   startDate: date('start_date').notNull(),
   endDate: date('end_date').notNull(),
