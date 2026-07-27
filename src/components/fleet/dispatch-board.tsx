@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { addDays, colomboToday, formatDayMonth, windowsOverlap } from '@/lib/fleet/dates'
+import { formatTripRoute } from '@/lib/fleet/labels'
 import type { Vehicle } from '@/lib/db/schema'
 import type { listDispatches } from '@/lib/db/queries/dispatches'
 import type { listDrivers } from '@/lib/db/queries/fleet'
@@ -473,10 +474,7 @@ export function DispatchBoard({ dispatches, pendingRequests, vehicles, drivers }
             ) : (
               <div className="space-y-3">
                 {pendingRequests.map((r) => {
-                  const label =
-                    r.requestType === 'visit'
-                      ? (r.propertyName ?? 'Unknown property')
-                      : (r.destinationText ?? '—')
+                  const label = formatTripRoute(r)
                   return (
                     <Card key={r.id}>
                       <CardContent className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
