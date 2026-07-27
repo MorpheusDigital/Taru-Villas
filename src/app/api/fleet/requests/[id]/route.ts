@@ -13,6 +13,8 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://tvpl.morpheusds.com'
 
 const updateSchema = z.object({
   targetPropertyId: z.string().uuid().nullable().optional(),
+  originKind: z.enum(['head_office', 'property', 'other']).optional(),
+  originPropertyId: z.string().uuid().nullable().optional(),
   originText: z.string().max(500).nullable().optional(),
   destinationText: z.string().max(500).nullable().optional(),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -97,6 +99,28 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'A standalone booking needs a destination' }, { status: 400 })
     }
 
+    // Fix 3: pick-up coherence, against the EFFECTIVE row. A partial body such
+    // as `{ originKind: 'property' }` carries no property id at all, so
+    // checking the patch in isolation would admit a row that names a property
+    // pick-up while pointing at nothing. hasOwnProperty (not `??`) for the same
+    // reason as above: both fields are nullable, so `??` cannot tell an explicit
+    // null-to-clear from "not provided".
+    const hasOriginKind = Object.prototype.hasOwnProperty.call(data, 'originKind')
+    const hasOriginPropertyId = Object.prototype.hasOwnProperty.call(data, 'originPropertyId')
+    const hasOriginText = Object.prototype.hasOwnProperty.call(data, 'originText')
+    const effectiveOriginKind = hasOriginKind ? data.originKind! : existing.originKind
+    const effectiveOriginPropertyId = hasOriginPropertyId
+      ? data.originPropertyId
+      : existing.originPropertyId
+    const effectiveOriginText = hasOriginText ? data.originText : existing.originText
+
+    if (effectiveOriginKind === 'property' && !effectiveOriginPropertyId) {
+      return NextResponse.json({ error: 'Choose a pick-up property' }, { status: 400 })
+    }
+    if (effectiveOriginKind === 'other' && !effectiveOriginText) {
+      return NextResponse.json({ error: 'Enter a pick-up location' }, { status: 400 })
+    }
+
     // Whitelist the editable fields explicitly rather than spreading
     // parsed.data straight through. updateRequest() takes a bare
     // Partial<NewFleetRequest> and will write ANY column it is handed —
@@ -114,7 +138,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     // "mirror case" that pools/dispatches against the wrong location.
     const updatePayload: Partial<NewFleetRequest> = {
       targetPropertyId: existing.requestType === 'visit' ? effectiveTargetPropertyId : null,
-      originText: data.originText,
+      originKind: effectiveOriginKind,
+      originPropertyId: effectiveOriginKind === 'property' ? effectiveOriginPropertyId : null,
+      originText: effectiveOriginKind === 'other' ? effectiveOriginText : null,
       destinationText: existing.requestType === 'standalone' ? effectiveDestinationText : null,
       startDate: data.startDate,
       endDate: data.endDate,
