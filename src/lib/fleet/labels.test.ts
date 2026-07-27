@@ -31,6 +31,16 @@ describe('formatOriginLabel', () => {
     expect(formatOriginLabel({ originKind: 'head_office', originPropertyName: 'The Long House', originText: 'x' }))
       .toBe('Head Office')
   })
+
+  it('degrades to Unknown property when property name is empty string', () => {
+    expect(formatOriginLabel({ originKind: 'property', originPropertyName: '', originText: null }))
+      .toBe('Unknown property')
+  })
+
+  it('degrades to Unknown property when property name is whitespace only', () => {
+    expect(formatOriginLabel({ originKind: 'property', originPropertyName: '   ', originText: null }))
+      .toBe('Unknown property')
+  })
 })
 
 describe('formatDestinationLabel', () => {
@@ -52,6 +62,16 @@ describe('formatDestinationLabel', () => {
   it('falls back to an em dash for a standalone trip with no destination', () => {
     expect(formatDestinationLabel({ requestType: 'standalone', propertyName: null, destinationText: null }))
       .toBe('—')
+  })
+
+  it('degrades to Unknown property for a visit with empty property name', () => {
+    expect(formatDestinationLabel({ requestType: 'visit', propertyName: '', destinationText: null }))
+      .toBe('Unknown property')
+  })
+
+  it('degrades to Unknown property for a visit with whitespace-only property name', () => {
+    expect(formatDestinationLabel({ requestType: 'visit', propertyName: '   ', destinationText: null }))
+      .toBe('Unknown property')
   })
 })
 
