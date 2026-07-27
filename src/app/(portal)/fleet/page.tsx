@@ -1,0 +1,39 @@
+import { redirect } from 'next/navigation'
+import { requireAuth } from '@/lib/auth/guards'
+import { listRequests } from '@/lib/db/queries/dispatches'
+import { listVehicles } from '@/lib/db/queries/fleet'
+import { getProperties } from '@/lib/db/queries/properties'
+import { RequestsTable } from '@/components/fleet/requests-table'
+
+export const dynamic = 'force-dynamic'
+
+export default async function FleetPage() {
+  const profile = await requireAuth()
+  if (!profile) return null
+
+  const isFleetAdmin = profile.isFleetAdmin || profile.role === 'admin'
+  if (!profile.canBookFleet && !isFleetAdmin) redirect('/surveys')
+
+  const [requests, vehicles, properties] = await Promise.all([
+    listRequests(profile.orgId, isFleetAdmin ? {} : { requestedBy: profile.id }),
+    listVehicles(profile.orgId),
+    getProperties(profile.orgId),
+  ])
+
+  return (
+    <RequestsTable
+      requests={requests}
+      vehicles={vehicles}
+      properties={properties}
+      currentUserId={profile.id}
+      isFleetAdmin={isFleetAdmin}
+      // Mirrors POST /api/fleet/requests's own authorization check
+      // (canBookFleet, or role admin) — deliberately not the same condition
+      // as isFleetAdmin, which only grants review/dispatch access. Without
+      // this, a fleet admin who cannot personally book trips would reach
+      // this page (via the isFleetAdmin bypass above) and see a "New
+      // request" button that predictably 403s on submit.
+      canCreateRequest={profile.canBookFleet || profile.role === 'admin'}
+    />
+  )
+}
