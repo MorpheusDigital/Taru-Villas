@@ -610,6 +610,25 @@ export async function discardDraftDispatch(id: string, orgId: string) {
  * WHERE rather than checked beforehand, so a racing `approveDispatch()`
  * wins cleanly — this simply returns `undefined` rather than overwriting an
  * already-approved dispatch's vehicle/driver/dates out from under it.
+ *
+ * Always stamps `generatedBy: 'manual'`, even when the dispatch was
+ * originally engine-generated. `isDiscardableEngineDraft()` (used by
+ * `replaceDraftDispatches`) is `status = 'draft' AND generatedBy = 'engine'`
+ * — if an edited draft kept `generatedBy: 'engine'`, the very next "Run
+ * engine now" (from this same board) or the 5pm cron would silently delete
+ * the admin's hand-corrected assignment and re-plan from scratch, with no
+ * message. An admin-touched draft is no longer purely engine output, and
+ * `'manual'` is what the rebuild's own discard predicate already treats as
+ * off-limits — the same protection `createManualDispatch` gives a
+ * brand-new manual dispatch, extended to one that started as an engine
+ * draft and was then edited.
+ *
+ * `notes` is genuinely optional here, not create-shaped: the key is only
+ * written when the caller's `data` object actually has a `notes` property
+ * (checked with `'notes' in data`, not `data.notes ?? null`) — a caller
+ * that omits `notes` entirely leaves the row's existing note untouched,
+ * the same absent-vs-explicit-null distinction the fleet requests PATCH
+ * route already applies via `hasOwnProperty`.
  */
 export async function updateDraftDispatch(
   id: string,
@@ -631,7 +650,8 @@ export async function updateDraftDispatch(
         driverId: data.driverId,
         startDate: data.startDate,
         endDate: data.endDate,
-        notes: data.notes ?? null,
+        generatedBy: 'manual',
+        ...('notes' in data ? { notes: data.notes ?? null } : {}),
         updatedAt: new Date(),
       })
       .where(and(eq(dispatches.id, id), eq(dispatches.orgId, orgId), eq(dispatches.status, 'draft')))

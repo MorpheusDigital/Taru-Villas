@@ -209,9 +209,23 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: validation.error }, { status: validation.status })
     }
 
+    // `notes` gets create-shaped semantics from `parsed.data.notes ?? null`
+    // if applied unconditionally — a PATCH body that simply doesn't mention
+    // notes (the dialog never sends it today) would then wipe an existing
+    // note rather than leaving it alone. `hasOwnProperty` (not `??`)
+    // distinguishes "caller sent an explicit null to clear the note" from
+    // "caller didn't touch this field", the same pattern
+    // requests/[id]/route.ts already uses for targetPropertyId/
+    // destinationText — only spread the key through when it was actually
+    // present in the request body.
+    const hasNotes = Object.prototype.hasOwnProperty.call(parsed.data, 'notes')
     const updated = await updateDraftDispatch(id, profile.orgId, {
-      ...parsed.data,
-      notes: parsed.data.notes ?? null,
+      vehicleId: parsed.data.vehicleId,
+      driverId: parsed.data.driverId,
+      startDate: parsed.data.startDate,
+      endDate: parsed.data.endDate,
+      requestIds: parsed.data.requestIds,
+      ...(hasNotes ? { notes: parsed.data.notes } : {}),
     })
     if (!updated) {
       // A concurrent approval/discard won the race between the checks
