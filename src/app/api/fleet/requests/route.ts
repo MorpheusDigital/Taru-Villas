@@ -9,6 +9,8 @@ const createSchema = z
   .object({
     requestType: z.enum(['visit', 'standalone']),
     targetPropertyId: z.string().uuid().nullable().optional(),
+    originKind: z.enum(['head_office', 'property', 'other']).default('head_office'),
+    originPropertyId: z.string().uuid().nullable().optional(),
     originText: z.string().max(500).nullable().optional(),
     destinationText: z.string().max(500).nullable().optional(),
     startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
@@ -29,6 +31,14 @@ const createSchema = z
   .refine((d) => d.requestType !== 'standalone' || Boolean(d.destinationText), {
     message: 'A standalone booking needs a destination',
     path: ['destinationText'],
+  })
+  .refine((d) => d.originKind !== 'property' || Boolean(d.originPropertyId), {
+    message: 'Choose a pick-up property',
+    path: ['originPropertyId'],
+  })
+  .refine((d) => d.originKind !== 'other' || Boolean(d.originText), {
+    message: 'Enter a pick-up location',
+    path: ['originText'],
   })
 
 export async function GET(request: NextRequest) {
@@ -98,7 +108,9 @@ export async function POST(request: NextRequest) {
       requestType: data.requestType,
       requestedBy: profile.id,
       targetPropertyId: data.requestType === 'visit' ? (data.targetPropertyId ?? null) : null,
-      originText: data.originText ?? null,
+      originKind: data.originKind,
+      originPropertyId: data.originKind === 'property' ? (data.originPropertyId ?? null) : null,
+      originText: data.originKind === 'other' ? (data.originText ?? null) : null,
       destinationText: data.requestType === 'standalone' ? (data.destinationText ?? null) : null,
       startDate: data.startDate,
       endDate: data.endDate,
