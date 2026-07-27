@@ -40,10 +40,9 @@ export function PushSetupBanner({ token, vapidPublicKey, strings }: PushSetupBan
   }, [])
 
   async function enable() {
-    if (!vapidPublicKey) {
-      toast.error(strings.pushNotConfigured)
-      return
-    }
+    // No dead-code guard for a missing vapidPublicKey here: the button this
+    // handles is only ever rendered when `supported && vapidPublicKey` (see
+    // the render branch below), so this can't be reached with an empty key.
     setBusy(true)
     try {
       const permission = await Notification.requestPermission()
@@ -83,14 +82,19 @@ export function PushSetupBanner({ token, vapidPublicKey, strings }: PushSetupBan
     }
   }
 
-  // A browser without push support (or WhatsApp's in-app view) still gets the
-  // manifest — it just cannot be alerted, so say so rather than showing a
-  // button that will never work.
-  if (!supported) {
+  // A browser without push support (or WhatsApp's in-app view) still gets
+  // the manifest — it just cannot be alerted, so say so rather than showing
+  // a button that will never work. An unset vapidPublicKey (push not
+  // configured for this environment/org yet) gets the exact same treatment
+  // for the exact same reason: a driver who taps "Turn on trip alerts" here
+  // would only ever be told to contact the office, which is precisely the
+  // phone-call-to-the-office outcome this feature exists to remove. Show
+  // the manual instructions instead of a button guaranteed to fail.
+  if (!supported || !vapidPublicKey) {
     return (
-      <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-        <p className="font-medium">{strings.setupTitle}</p>
-        <ol className="mt-2 list-decimal space-y-1 pl-5">
+      <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-base text-amber-900">
+        <p className="text-lg font-semibold">{strings.setupTitle}</p>
+        <ol className="mt-2 list-decimal space-y-2 pl-5">
           <li>{strings.setupStep1}</li>
           <li>{strings.setupStep2}</li>
           <li>{strings.setupStep3}</li>
@@ -101,16 +105,16 @@ export function PushSetupBanner({ token, vapidPublicKey, strings }: PushSetupBan
 
   if (subscribed) {
     return (
-      <p className="flex items-center gap-2 text-sm text-emerald-700">
-        <CheckCircle2 className="size-4" /> {strings.notificationsOn}
+      <p className="flex items-center gap-2 text-base font-medium text-emerald-700">
+        <CheckCircle2 className="size-5" /> {strings.notificationsOn}
       </p>
     )
   }
 
   return (
     <div className="rounded-lg border border-amber-300 bg-amber-50 p-4">
-      <p className="mb-3 text-sm font-medium text-amber-900">{strings.setupTitle}</p>
-      <Button onClick={enable} disabled={busy} size="lg" className="w-full">
+      <p className="mb-3 text-lg font-semibold text-amber-900">{strings.setupTitle}</p>
+      <Button onClick={enable} disabled={busy} size="lg" className="h-14 w-full text-lg">
         <BellRing className="mr-2 size-5" />
         {busy ? '…' : strings.enableNotifications}
       </Button>

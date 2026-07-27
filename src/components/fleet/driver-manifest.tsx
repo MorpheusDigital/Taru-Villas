@@ -8,8 +8,13 @@ import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { colomboToday, formatDayMonth } from '@/lib/fleet/dates'
-import { MANIFEST_STRINGS, type ManifestLanguage, type ManifestStrings } from '@/lib/fleet/manifest-strings'
+import { colomboToday, formatColomboTime } from '@/lib/fleet/dates'
+import {
+  formatManifestDayMonth,
+  MANIFEST_STRINGS,
+  type ManifestLanguage,
+  type ManifestStrings,
+} from '@/lib/fleet/manifest-strings'
 import type { getDriverDispatches } from '@/lib/db/queries/dispatches'
 import { PushSetupBanner } from './push-setup-banner'
 
@@ -41,10 +46,6 @@ async function parseErrorMessage(res: Response, fallback: string): Promise<strin
   return fallback
 }
 
-function formatTime(value: Date): string {
-  return value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
 type StatusBody =
   | { action: 'start'; dispatchId: string }
   | { action: 'complete'; dispatchId: string }
@@ -59,10 +60,15 @@ export function DriverManifest({
 }: DriverManifestProps) {
   const router = useRouter()
   const [lang, setLang] = useState<ManifestLanguage>(initialLanguage)
-  // Identifies exactly the control currently in flight (e.g. "dispatch:<id>"
-  // or "stop:<id>") so only that button disables — a driver marking arrival
-  // at one stop should not be blocked from anything else on the page.
-  const [busyKey, setBusyKey] = useState<string | null>(null)
+  // The set of controls currently in flight (e.g. "dispatch:<id>" or
+  // "stop:<id>"), so only the matching button disables — a driver marking
+  // arrival at one stop should not be blocked from anything else on the
+  // page. A single `string | null` slot isn't enough here: tapping Arrived
+  // on a stop and then Complete trip while it's still in flight is a
+  // legitimate sequence, and with one slot the Arrived request landing
+  // first would clear busy state and silently re-enable Complete trip
+  // while its own request is still outstanding.
+  const [busyKeys, setBusyKeys] = useState<Set<string>>(() => new Set())
   const strings = MANIFEST_STRINGS[lang]
 
   useEffect(() => {
@@ -113,7 +119,7 @@ export function DriverManifest({
    * genuine failure (wrong driver, or truly not found).
    */
   async function runStatusAction(key: string, body: StatusBody, recoverDispatchId?: string) {
-    setBusyKey(key)
+    setBusyKeys((prev) => new Set(prev).add(key))
     try {
       const res = await fetch(`/api/fleet/driver/${token}/status`, {
         method: 'POST',
@@ -156,7 +162,12 @@ export function DriverManifest({
       console.error('Fleet driver status update error:', error)
       toast.error(strings.statusUpdateFailed)
     } finally {
-      setBusyKey(null)
+      setBusyKeys((prev) => {
+        if (!prev.has(key)) return prev
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
     }
   }
 
@@ -164,9 +175,14 @@ export function DriverManifest({
     const key = `dispatch:${dispatch.id}`
     if (dispatch.status === 'approved') {
       runStatusAction(key, { action: 'start', dispatchId: dispatch.id }, dispatch.id)
-    } else {
-      runStatusAction(key, { action: 'complete', dispatchId: dispatch.id }, dispatch.id)
+      return
     }
+    // Complete trip is irreversible from the driver's side (their only undo
+    // is a phone call), and it lands in exactly the pixel position Start
+    // trip occupied a moment earlier — a confirmation is the only thing
+    // standing between a reflex second tap and an unintended completion.
+    if (!window.confirm(strings.confirmCompleteTrip)) return
+    runStatusAction(key, { action: 'complete', dispatchId: dispatch.id }, dispatch.id)
   }
 
   function handleArrive(stopId: string) {
@@ -250,7 +266,8 @@ export function DriverManifest({
                   {todayDispatch.vehicleName} · {todayDispatch.registrationNo}
                 </p>
                 <p className="text-base text-muted-foreground">
-                  {formatDayMonth(todayDispatch.startDate)} – {formatDayMonth(todayDispatch.endDate)}
+                  {formatManifestDayMonth(todayDispatch.startDate, lang)} –{' '}
+                  {formatManifestDayMonth(todayDispatch.endDate, lang)}
                 </p>
               </div>
             </div>
@@ -260,7 +277,13 @@ export function DriverManifest({
                 {strings.stops}
               </h2>
               {todayDispatch.stops.map((stop) => (
-                <StopCard key={stop.id} stop={stop} strings={strings} busyKey={busyKey} onArrive={handleArrive} />
+                <StopCard
+                  key={stop.id}
+                  stop={stop}
+                  strings={strings}
+                  isBusy={busyKeys.has(`stop:${stop.id}`)}
+                  onArrive={handleArrive}
+                />
               ))}
             </div>
 
@@ -268,10 +291,10 @@ export function DriverManifest({
               type="button"
               size="lg"
               className="h-14 w-full text-lg font-semibold"
-              disabled={busyKey === `dispatch:${todayDispatch.id}`}
+              disabled={busyKeys.has(`dispatch:${todayDispatch.id}`)}
               onClick={() => handlePrimaryAction(todayDispatch)}
             >
-              {busyKey === `dispatch:${todayDispatch.id}`
+              {busyKeys.has(`dispatch:${todayDispatch.id}`)
                 ? strings.loading
                 : todayDispatch.status === 'approved'
                   ? strings.startTrip
@@ -291,7 +314,7 @@ export function DriverManifest({
                   {dispatch.vehicleName} · {dispatch.registrationNo}
                 </p>
                 <p className="text-base text-muted-foreground">
-                  {formatDayMonth(dispatch.startDate)} – {formatDayMonth(dispatch.endDate)}
+                  {formatManifestDayMonth(dispatch.startDate, lang)} – {formatManifestDayMonth(dispatch.endDate, lang)}
                 </p>
                 <p className="text-base text-muted-foreground">
                   {strings.stops}: {dispatch.stops.length}
@@ -310,15 +333,14 @@ export function DriverManifest({
 function StopCard({
   stop,
   strings,
-  busyKey,
+  isBusy,
   onArrive,
 }: {
   stop: DispatchStop
   strings: ManifestStrings
-  busyKey: string | null
+  isBusy: boolean
   onArrive: (stopId: string) => void
 }) {
-  const key = `stop:${stop.id}`
   return (
     <div className="space-y-3 rounded-lg border p-4">
       <div className="flex items-start gap-3">
@@ -345,17 +367,23 @@ function StopCard({
       {stop.arrivedAt ? (
         <p className="flex items-center gap-2 text-base font-medium text-emerald-700">
           <CheckCircle2 className="size-5" />
-          {strings.arrivedAt} {formatTime(stop.arrivedAt)}
+          {strings.arrivedAt} {formatColomboTime(stop.arrivedAt)}
         </p>
       ) : (
+        // Outline, not the default filled variant: this page's one real
+        // primary action is Start/Complete trip below. A row of identical
+        // full-width filled buttons gives a driver no visual cue for which
+        // one matters most, which is exactly the "one big button, not a row
+        // of equals" rule this page is built around.
         <Button
           type="button"
+          variant="outline"
           size="lg"
           className="h-14 w-full text-lg font-semibold"
-          disabled={busyKey === key}
+          disabled={isBusy}
           onClick={() => onArrive(stop.id)}
         >
-          {busyKey === key ? strings.loading : strings.arrived}
+          {isBusy ? strings.loading : strings.arrived}
         </Button>
       )}
     </div>
