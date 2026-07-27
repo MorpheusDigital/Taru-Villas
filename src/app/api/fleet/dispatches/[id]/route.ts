@@ -8,6 +8,7 @@ import {
   getRequestById,
   updateDraftDispatch,
 } from '@/lib/db/queries/dispatches'
+import { getDriverById } from '@/lib/db/queries/fleet'
 import { validateManualDispatchInput } from '@/lib/fleet/dispatch-validation'
 import { notify } from '@/lib/fleet/push'
 import { formatDayMonth } from '@/lib/fleet/dates'
@@ -86,14 +87,22 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     try {
       const window = `${formatDayMonth(approved.startDate)}–${formatDayMonth(approved.endDate)}`
 
-      await notify({
-        orgId: profile.orgId,
-        driverId: approved.driverId,
-        type: 'dispatch_assigned',
-        title: 'New trip assigned',
-        body: `You have a trip on ${window}. Open your manifest for details.`,
-        linkUrl: `${APP_URL}/d/`,
-      })
+      // /d/ (no token) is not a route — the driver has no account and no
+      // session, so `sw.js`'s notificationclick handler falling back to
+      // openWindow() on that URL would land them on /login. The driver's
+      // own token-scoped manifest link is the only thing that works; do not
+      // log the token or return it in the response body below.
+      const driver = await getDriverById(approved.driverId)
+      if (driver) {
+        await notify({
+          orgId: profile.orgId,
+          driverId: approved.driverId,
+          type: 'dispatch_assigned',
+          title: 'New trip assigned',
+          body: `You have a trip on ${window}. Open your manifest for details.`,
+          linkUrl: `${APP_URL}/d/${driver.accessToken}`,
+        })
+      }
 
       // A dispatch can carry several stops from the SAME requester (pooled
       // legs for one guest, or one requester with two visit legs) —

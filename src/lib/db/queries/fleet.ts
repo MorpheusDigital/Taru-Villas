@@ -102,6 +102,11 @@ export async function getDriverByToken(token: string) {
   return rows[0]
 }
 
+export async function getDriverById(id: string) {
+  const rows = await db.select().from(drivers).where(eq(drivers.id, id)).limit(1)
+  return rows[0]
+}
+
 export async function createDriver(data: NewDriver) {
   const [inserted] = await db.insert(drivers).values(data).returning()
   return inserted

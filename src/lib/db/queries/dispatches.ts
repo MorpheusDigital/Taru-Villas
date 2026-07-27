@@ -77,8 +77,63 @@ export async function updateRequest(id: string, data: Partial<NewFleetRequest>) 
   return updated
 }
 
+/**
+ * Cancels a request AND removes its stop from whatever dispatch it was
+ * attached to — draft, approved, or already in_progress. A status flip
+ * alone leaves the `dispatch_stops` row behind: neither `getDriverDispatches`
+ * nor `listDispatches` filters stops by their request's status, so the
+ * driver's manifest (and the dispatch board) would keep showing a stop for
+ * a trip that no longer exists, with no self-healing path for an approved
+ * dispatch (only a discardable engine draft gets swept, by
+ * `replaceDraftDispatches`).
+ *
+ * Runs in one transaction so a request can never end up `cancelled` with its
+ * stop still attached (or vice versa) if the process dies mid-way.
+ *
+ * Returns the affected dispatches (id + driverId), scoped to `approved`/
+ * `in_progress` only, so the caller can decide whether to notify a driver.
+ * A `draft`'s driver was never told anything about this stop — removing it
+ * silently is correct and needs no notification. Deliberately does NOT call
+ * `notify()` itself: every other notification in this feature is fired from
+ * the route layer (see dispatches/[id]/route.ts's approve handler), kept
+ * out of the query layer and wrapped so it can never affect the mutation
+ * that triggered it.
+ */
 export async function cancelRequest(id: string) {
-  return updateRequest(id, { status: 'cancelled' })
+  return db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(fleetRequests)
+      .set({ status: 'cancelled', updatedAt: new Date() })
+      .where(eq(fleetRequests.id, id))
+      .returning()
+    if (!updated) return undefined
+
+    // Captured BEFORE the delete below, same reason as every other
+    // free-then-delete pattern in this file: the FK's cascade only applies
+    // to a deleted DISPATCH, not a deleted stop, but reading dispatch
+    // status/driver off a row this query is about to remove still has to
+    // happen first.
+    const affected = await tx
+      .select({
+        dispatchId: dispatchStops.dispatchId,
+        dispatchStatus: dispatches.status,
+        driverId: dispatches.driverId,
+      })
+      .from(dispatchStops)
+      .innerJoin(dispatches, eq(dispatchStops.dispatchId, dispatches.id))
+      .where(eq(dispatchStops.requestId, id))
+
+    if (affected.length > 0) {
+      await tx.delete(dispatchStops).where(eq(dispatchStops.requestId, id)).returning()
+    }
+
+    return {
+      request: updated,
+      dispatchesToNotify: affected
+        .filter((a) => a.dispatchStatus === 'approved' || a.dispatchStatus === 'in_progress')
+        .map((a) => ({ dispatchId: a.dispatchId, driverId: a.driverId })),
+    }
+  })
 }
 
 // --- Engine plumbing -------------------------------------------------------
@@ -310,6 +365,18 @@ export async function replaceDraftDispatches(orgId: string, result: EngineResult
       )
       const liveStops = draft.stops.filter((s) => liveRequestIds.has(s.requestId))
 
+      // Every request in this planned cluster was cancelled in the gap
+      // between planning and this transaction (the re-check above) — there
+      // is nothing left to dispatch. Skip the insert entirely rather than
+      // create-then-leave-empty: a stopless draft still renders on the
+      // board ("No stops attached.") with "Approve & Dispatch" fully
+      // enabled, which would book a real vehicle and driver and push "New
+      // trip assigned" for a trip with nowhere to go. This guard is scoped
+      // to the engine rebuild path only — an empty MANUAL dispatch is a
+      // legitimate repositioning run and must stay possible via
+      // `createManualDispatch`.
+      if (liveStops.length === 0) continue
+
       const [dispatch] = await tx
         .insert(dispatches)
         .values({
@@ -323,31 +390,29 @@ export async function replaceDraftDispatches(orgId: string, result: EngineResult
         })
         .returning()
 
-      if (liveStops.length > 0) {
-        await tx
-          .insert(dispatchStops)
-          .values(
-            liveStops.map((s) => ({
-              dispatchId: dispatch.id,
-              requestId: s.requestId,
-              propertyId: s.propertyId,
-              label: s.label,
-              sortOrder: s.sortOrder,
-            })),
-          )
-          .returning()
+      await tx
+        .insert(dispatchStops)
+        .values(
+          liveStops.map((s) => ({
+            dispatchId: dispatch.id,
+            requestId: s.requestId,
+            propertyId: s.propertyId,
+            label: s.label,
+            sortOrder: s.sortOrder,
+          })),
+        )
+        .returning()
 
-        await tx
-          .update(fleetRequests)
-          .set({ status: 'queued', updatedAt: new Date() })
-          .where(
-            and(
-              inArray(fleetRequests.id, liveStops.map((s) => s.requestId)),
-              ne(fleetRequests.status, 'cancelled'),
-            ),
-          )
-          .returning()
-      }
+      await tx
+        .update(fleetRequests)
+        .set({ status: 'queued', updatedAt: new Date() })
+        .where(
+          and(
+            inArray(fleetRequests.id, liveStops.map((s) => s.requestId)),
+            ne(fleetRequests.status, 'cancelled'),
+          ),
+        )
+        .returning()
 
       created.push(dispatch.id)
     }

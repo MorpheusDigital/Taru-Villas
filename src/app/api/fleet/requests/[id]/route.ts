@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getProfile } from '@/lib/auth/guards'
 import { cancelRequest, getRequestById, updateRequest } from '@/lib/db/queries/dispatches'
-import { listVehicles } from '@/lib/db/queries/fleet'
+import { getDriverById, listVehicles } from '@/lib/db/queries/fleet'
 import { validateFleetRequest } from '@/lib/fleet/constraints'
+import { notify } from '@/lib/fleet/push'
 import type { NewFleetRequest } from '@/lib/db/schema'
 
 type RouteContext = { params: Promise<{ id: string }> }
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://tvpl.morpheusds.com'
 
 const updateSchema = z.object({
   targetPropertyId: z.string().uuid().nullable().optional(),
@@ -199,7 +202,38 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
       )
     }
 
-    return NextResponse.json(await cancelRequest(id))
+    const result = await cancelRequest(id)
+    if (!result) {
+      // existing was just re-fetched above and passed every check, so this
+      // only fires on a genuine race (e.g. deleted between the checks and
+      // the write) — treat it the same as "not found" rather than 500.
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    }
+
+    // Best-effort, and run AFTER the cancellation has already committed —
+    // same shape as the approve handler's notify block. A dispatch in
+    // dispatchesToNotify is already approved/in_progress, meaning its driver
+    // was already told "go here"; removing the stop without telling them is
+    // wrong, but a notification failure must never turn into a failed
+    // cancellation (the requester would retry and could double-cancel).
+    try {
+      for (const d of result.dispatchesToNotify) {
+        const driver = await getDriverById(d.driverId)
+        if (!driver) continue
+        await notify({
+          orgId: profile.orgId,
+          driverId: d.driverId,
+          type: 'dispatch_stop_removed',
+          title: 'Trip update',
+          body: 'A stop was cancelled and removed from your manifest.',
+          linkUrl: `${APP_URL}/d/${driver.accessToken}`,
+        })
+      }
+    } catch (notifyError) {
+      console.error('Request cancelled but notification failed:', notifyError)
+    }
+
+    return NextResponse.json(result.request)
   } catch (error) {
     console.error('DELETE /api/fleet/requests/[id] error:', error)
     return NextResponse.json({ error: 'Failed to cancel request' }, { status: 500 })
