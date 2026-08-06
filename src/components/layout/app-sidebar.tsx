@@ -20,12 +20,10 @@ import {
   Trash2,
   UserCheck,
   Package,
-  Truck,
-  CalendarClock,
-  Route,
 } from 'lucide-react'
 
 import { useAuth } from '@/components/providers/auth-provider'
+import { getFleetNavigationItems } from '@/lib/fleet/navigation'
 import { createClient } from '@/lib/supabase/client'
 
 import {
@@ -73,8 +71,6 @@ const mainNavItems: NavItem[] = [
   { title: 'Utilities', href: '/utilities', icon: Gauge },
   { title: 'Daily Wastage', href: '/waste', icon: Trash2 },
   { title: 'Asset Registry', href: '/assets', icon: Package },
-  { title: 'Fleet', href: '/fleet', icon: Truck },
-  { title: 'Dispatch', href: '/fleet/dispatch', icon: CalendarClock },
   { title: 'Settings', href: '/settings', icon: Settings },
 ]
 
@@ -88,9 +84,6 @@ const adminNavItems: NavItem[] = [
   { title: 'Property Settings', href: '/admin/properties', icon: Building2 },
   { title: 'Users', href: '/admin/users', icon: Users },
   { title: 'Allowed Emails', href: '/admin/allowed-emails', icon: ShieldCheck },
-  { title: 'Vehicles', href: '/admin/fleet/vehicles', icon: Truck },
-  { title: 'Drivers', href: '/admin/fleet/drivers', icon: Users },
-  { title: 'Distances', href: '/admin/fleet/distances', icon: Route },
 ]
 
 // ---------------------------------------------------------------------------
@@ -151,12 +144,11 @@ export function AppSidebar() {
 
   const isFleetAdmin = profile.isFleetAdmin || profile.role === 'admin'
   const canSeeFleet = profile.canBookFleet || isFleetAdmin
+  const fleetNavItems = getFleetNavigationItems(canSeeFleet, isFleetAdmin)
 
   const visibleMainNavItems = mainNavItems.filter((item) => {
     if (item.href === '/dashboard') return showAdminSection
     if (item.href === '/issues') return showIssuesNav
-    if (item.href === '/fleet') return canSeeFleet
-    if (item.href === '/fleet/dispatch') return isFleetAdmin
     return true
   })
 
@@ -207,6 +199,31 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {fleetNavItems.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Fleet Management</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {fleetNavItems.map((item) => (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive(item.href)}
+                      tooltip={item.title}
+                      className="h-9 rounded-lg transition-colors data-[active=true]:font-medium hover:bg-white/40 dark:hover:bg-white/5 data-[active=true]:bg-white/55 dark:data-[active=true]:bg-white/10 data-[active=true]:shadow-sm"
+                    >
+                      <Link href={item.href} onClick={() => setOpenMobile(false)}>
+                        <item.icon className="size-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         {/* ---- Properties Section (Property Manager + Admin) ---- */}
         {showPropertySection && (
