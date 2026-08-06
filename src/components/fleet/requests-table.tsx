@@ -10,7 +10,7 @@ import {
   flexRender,
   type ColumnDef,
 } from '@tanstack/react-table'
-import { Ban, CarFront, ChevronLeft, ChevronRight, MoreHorizontal, Pencil, Plus } from 'lucide-react'
+import { Ban, CarFront, ChevronLeft, ChevronRight, FileText, MoreHorizontal, Pencil, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
@@ -56,8 +56,12 @@ import {
 } from '@/components/ui/select'
 import { formatDayMonth } from '@/lib/fleet/dates'
 import { formatTripRoute } from '@/lib/fleet/labels'
+import { getReportStatus, type TripReportStatus } from '@/lib/fleet/reports'
 import type { Property, Vehicle } from '@/lib/db/schema'
 import { RequestForm, type FleetRequestRow } from './request-form'
+import { TripReportDialog } from './trip-report-dialog'
+import type { FleetTaskReasonOption } from '@/lib/db/queries/dispatches'
+import type { ProjectWithCounts } from '@/lib/db/queries/projects'
 
 const TYPE_LABELS: Record<FleetRequestRow['requestType'], string> = {
   visit: 'Property visit',
@@ -79,6 +83,18 @@ const statusColors: Record<string, string> = {
   dispatched: 'bg-emerald-100 text-emerald-800',
   completed: 'bg-slate-100 text-slate-800',
   cancelled: 'bg-red-100 text-red-800',
+}
+
+const REPORT_STATUS_LABELS: Record<TripReportStatus, string> = {
+  pending: 'Pending',
+  submitted: 'Submitted',
+  overdue: 'Overdue',
+}
+
+const reportStatusColors: Record<TripReportStatus, string> = {
+  pending: 'bg-yellow-100 text-yellow-800',
+  submitted: 'bg-emerald-100 text-emerald-800',
+  overdue: 'bg-red-100 text-red-800',
 }
 
 const STATUS_FILTERS: { value: string; label: string }[] = [
@@ -123,6 +139,15 @@ function canCancelRow(r: FleetRequestRow, currentUserId: string, isFleetAdmin: b
   return isOwner || isFleetAdmin
 }
 
+function getRowReportStatus(r: FleetRequestRow): TripReportStatus | null {
+  if (!r.tripReportDueAt) return null
+  return getReportStatus(r.tripReportDueAt, r.tripReportSubmittedAt)
+}
+
+function canSubmitTripReport(r: FleetRequestRow, currentUserId: string): boolean {
+  return r.status === 'completed' && r.requestedBy === currentUserId && getRowReportStatus(r) !== 'submitted'
+}
+
 // ---------------------------------------------------------------------------
 // Column definitions
 // ---------------------------------------------------------------------------
@@ -131,7 +156,8 @@ function createColumns(
   currentUserId: string,
   isFleetAdmin: boolean,
   onEdit: (r: FleetRequestRow) => void,
-  onCancel: (r: FleetRequestRow) => void
+  onCancel: (r: FleetRequestRow) => void,
+  onSubmitReport: (r: FleetRequestRow) => void,
 ): ColumnDef<FleetRequestRow>[] {
   return [
     {
@@ -174,6 +200,11 @@ function createColumns(
       cell: ({ row }) => row.original.requesterName ?? 'Unknown',
     },
     {
+      id: 'task',
+      header: 'Task reason',
+      cell: ({ row }) => row.original.taskTitle ?? <span className="text-muted-foreground">—</span>,
+    },
+    {
       id: 'status',
       header: 'Status',
       cell: ({ row }) => {
@@ -186,13 +217,27 @@ function createColumns(
       },
     },
     {
+      id: 'tripReport',
+      header: 'Trip report',
+      cell: ({ row }) => {
+        const reportStatus = getRowReportStatus(row.original)
+        if (!reportStatus) return <span className="text-muted-foreground">—</span>
+        return (
+          <Badge variant="outline" className={reportStatusColors[reportStatus]}>
+            {REPORT_STATUS_LABELS[reportStatus]}
+          </Badge>
+        )
+      },
+    },
+    {
       id: 'actions',
       header: '',
       cell: ({ row }) => {
         const r = row.original
         const editable = canEditRow(r, currentUserId, isFleetAdmin)
         const cancellable = canCancelRow(r, currentUserId, isFleetAdmin)
-        if (!editable && !cancellable) {
+        const canSubmitReport = canSubmitTripReport(r, currentUserId)
+        if (!editable && !cancellable && !canSubmitReport) {
           return <span className="text-muted-foreground">—</span>
         }
         return (
@@ -210,7 +255,14 @@ function createColumns(
                   Edit
                 </DropdownMenuItem>
               )}
-              {editable && cancellable && <DropdownMenuSeparator />}
+              {(editable || canSubmitReport) && cancellable && <DropdownMenuSeparator />}
+              {canSubmitReport && (
+                <DropdownMenuItem onClick={() => onSubmitReport(r)}>
+                  <FileText className="size-4" />
+                  Submit report
+                </DropdownMenuItem>
+              )}
+              {editable && canSubmitReport && <DropdownMenuSeparator />}
               {cancellable && (
                 <DropdownMenuItem variant="destructive" onClick={() => onCancel(r)}>
                   <Ban className="size-4" />
@@ -233,6 +285,8 @@ interface RequestsTableProps {
   requests: FleetRequestRow[]
   vehicles: Vehicle[]
   properties: Property[]
+  projects: ProjectWithCounts[]
+  eligibleTasks: FleetTaskReasonOption[]
   currentUserId: string
   isFleetAdmin: boolean
   /**
@@ -249,6 +303,8 @@ export function RequestsTable({
   requests,
   vehicles,
   properties,
+  projects,
+  eligibleTasks,
   currentUserId,
   isFleetAdmin,
   canCreateRequest,
@@ -261,6 +317,7 @@ export function RequestsTable({
   const [createOpen, setCreateOpen] = useState(false)
   const [editRequest, setEditRequest] = useState<FleetRequestRow | null>(null)
   const [cancelTarget, setCancelTarget] = useState<FleetRequestRow | null>(null)
+  const [reportTarget, setReportTarget] = useState<FleetRequestRow | null>(null)
   const [isCanceling, setIsCanceling] = useState(false)
 
   const filtered = useMemo(() => {
@@ -277,6 +334,10 @@ export function RequestsTable({
 
   function handleCancelClick(r: FleetRequestRow) {
     setCancelTarget(r)
+  }
+
+  function handleSubmitReport(r: FleetRequestRow) {
+    setReportTarget(r)
   }
 
   async function handleCancel() {
@@ -298,7 +359,7 @@ export function RequestsTable({
   }
 
   const columns = useMemo(
-    () => createColumns(currentUserId, isFleetAdmin, handleEdit, handleCancelClick),
+    () => createColumns(currentUserId, isFleetAdmin, handleEdit, handleCancelClick, handleSubmitReport),
     [currentUserId, isFleetAdmin]
   )
 
@@ -454,6 +515,8 @@ export function RequestsTable({
           <RequestForm
             vehicles={vehicles}
             properties={properties}
+            projects={projects}
+            eligibleTasks={eligibleTasks}
             onSuccess={() => setCreateOpen(false)}
           />
         </DialogContent>
@@ -471,6 +534,8 @@ export function RequestsTable({
               request={editRequest}
               vehicles={vehicles}
               properties={properties}
+              projects={projects}
+              eligibleTasks={eligibleTasks}
               onSuccess={() => setEditRequest(null)}
             />
           )}
@@ -495,6 +560,16 @@ export function RequestsTable({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <TripReportDialog
+        requestId={reportTarget?.id ?? null}
+        open={!!reportTarget}
+        onOpenChange={(open) => !open && setReportTarget(null)}
+        onSaved={() => {
+          setReportTarget(null)
+          router.refresh()
+        }}
+      />
     </div>
   )
 }

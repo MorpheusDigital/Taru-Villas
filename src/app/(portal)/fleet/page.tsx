@@ -1,8 +1,9 @@
 import { redirect } from 'next/navigation'
 import { requireAuth } from '@/lib/auth/guards'
-import { listRequests } from '@/lib/db/queries/dispatches'
+import { listEligibleFleetTasks, listRequests } from '@/lib/db/queries/dispatches'
 import { listVehicles } from '@/lib/db/queries/fleet'
 import { getProperties } from '@/lib/db/queries/properties'
+import { getProjects } from '@/lib/db/queries/projects'
 import { RequestsTable } from '@/components/fleet/requests-table'
 
 export const dynamic = 'force-dynamic'
@@ -14,10 +15,12 @@ export default async function FleetPage() {
   const isFleetAdmin = profile.isFleetAdmin || profile.role === 'admin'
   if (!profile.canBookFleet && !isFleetAdmin) redirect('/surveys')
 
-  const [requests, vehicles, properties] = await Promise.all([
+  const [requests, vehicles, properties, projects, eligibleTasks] = await Promise.all([
     listRequests(profile.orgId, isFleetAdmin ? {} : { requestedBy: profile.id }),
     listVehicles(profile.orgId),
     getProperties(profile.orgId),
+    getProjects(profile.orgId),
+    listEligibleFleetTasks(profile.orgId),
   ])
 
   return (
@@ -25,6 +28,8 @@ export default async function FleetPage() {
       requests={requests}
       vehicles={vehicles}
       properties={properties}
+      projects={projects}
+      eligibleTasks={eligibleTasks}
       currentUserId={profile.id}
       isFleetAdmin={isFleetAdmin}
       // Mirrors POST /api/fleet/requests's own authorization check

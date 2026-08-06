@@ -590,6 +590,7 @@ export const issues = pgTable('issues', {
   status: issueStatusEnum('status').default('open').notNull(),
   assignedTo: uuid('assigned_to')
     .references(() => profiles.id, { onDelete: 'set null' }),
+  taskId: uuid('task_id').unique().references(() => tasks.id, { onDelete: 'set null' }),
   isRepeatIssue: boolean('is_repeat_issue').default(false).notNull(),
   closingNotes: text('closing_notes'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -1589,6 +1590,7 @@ export const fleetRequests = pgTable('fleet_requests', {
   cargoRequired: boolean('cargo_required').default(false).notNull(),
   purpose: text('purpose'),
   notes: text('notes'),
+  taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'set null' }),
   status: fleetRequestStatusEnum('status').default('pending').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -1621,6 +1623,20 @@ export const dispatchStops = pgTable('dispatch_stops', {
   label: text('label'),
   sortOrder: integer('sort_order').default(0).notNull(),
   arrivedAt: timestamp('arrived_at', { withTimezone: true }),
+})
+
+export const fleetTripReports = pgTable('fleet_trip_reports', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id),
+  requestId: uuid('request_id').notNull().unique().references(() => fleetRequests.id, { onDelete: 'cascade' }),
+  taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  submittedBy: uuid('submitted_by').notNull().references(() => profiles.id),
+  dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
+  submittedAt: timestamp('submitted_at', { withTimezone: true }),
+  summary: text('summary'),
+  attachmentUrls: text('attachment_urls').array().default(sql`'{}'::text[]`).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
 export const pushSubscriptions = pgTable('push_subscriptions', {
@@ -1679,7 +1695,14 @@ export const fleetRequestsRelations = relations(fleetRequests, ({ one, many }) =
     fields: [fleetRequests.targetPropertyId],
     references: [properties.id],
   }),
+  task: one(tasks, { fields: [fleetRequests.taskId], references: [tasks.id] }),
   stops: many(dispatchStops),
+}))
+
+export const fleetTripReportsRelations = relations(fleetTripReports, ({ one }) => ({
+  request: one(fleetRequests, { fields: [fleetTripReports.requestId], references: [fleetRequests.id] }),
+  task: one(tasks, { fields: [fleetTripReports.taskId], references: [tasks.id] }),
+  submitter: one(profiles, { fields: [fleetTripReports.submittedBy], references: [profiles.id] }),
 }))
 
 export const dispatchesRelations = relations(dispatches, ({ one, many }) => ({
@@ -1708,5 +1731,7 @@ export type Dispatch = typeof dispatches.$inferSelect
 export type NewDispatch = typeof dispatches.$inferInsert
 export type DispatchStop = typeof dispatchStops.$inferSelect
 export type NewDispatchStop = typeof dispatchStops.$inferInsert
+export type FleetTripReport = typeof fleetTripReports.$inferSelect
+export type NewFleetTripReport = typeof fleetTripReports.$inferInsert
 export type PushSubscription = typeof pushSubscriptions.$inferSelect
 export type Notification = typeof notifications.$inferSelect

@@ -7,8 +7,12 @@ import {
   drivers,
   driverVehicles,
   fleetRequests,
+  fleetTripReports,
+  projects,
   profiles,
   properties,
+  taskAssignees,
+  tasks,
   vehicles,
   type NewFleetRequest,
 } from '../schema'
@@ -54,13 +58,19 @@ export async function listRequests(
       cargoRequired: fleetRequests.cargoRequired,
       purpose: fleetRequests.purpose,
       notes: fleetRequests.notes,
+      taskId: fleetRequests.taskId,
+      taskTitle: tasks.title,
       status: fleetRequests.status,
+      tripReportDueAt: fleetTripReports.dueAt,
+      tripReportSubmittedAt: fleetTripReports.submittedAt,
       createdAt: fleetRequests.createdAt,
     })
     .from(fleetRequests)
     .leftJoin(profiles, eq(fleetRequests.requestedBy, profiles.id))
     .leftJoin(properties, eq(fleetRequests.targetPropertyId, properties.id))
     .leftJoin(originProperty, eq(fleetRequests.originPropertyId, originProperty.id))
+    .leftJoin(tasks, eq(fleetRequests.taskId, tasks.id))
+    .leftJoin(fleetTripReports, eq(fleetTripReports.requestId, fleetRequests.id))
     .where(and(...conditions))
     .orderBy(asc(fleetRequests.startDate), desc(fleetRequests.createdAt))
 }
@@ -73,6 +83,89 @@ export async function getRequestById(id: string) {
 export async function createRequest(data: NewFleetRequest) {
   const [inserted] = await db.insert(fleetRequests).values(data).returning()
   return inserted
+}
+
+export type FleetTaskReasonOption = {
+  id: string
+  title: string
+  propertyId: string
+  propertyName: string | null
+  projectId: string
+  projectName: string
+}
+
+/** Tasks which can explain a new fleet request: open, property-linked, and in an active project. */
+export async function listEligibleFleetTasks(orgId: string): Promise<FleetTaskReasonOption[]> {
+  return db
+    .select({
+      id: tasks.id,
+      title: tasks.title,
+      propertyId: tasks.propertyId,
+      propertyName: properties.name,
+      projectId: projects.id,
+      projectName: projects.name,
+    })
+    .from(tasks)
+    .innerJoin(projects, eq(tasks.projectId, projects.id))
+    .leftJoin(properties, eq(tasks.propertyId, properties.id))
+    .where(and(eq(tasks.orgId, orgId), ne(tasks.status, 'done'), eq(projects.status, 'active')))
+    .orderBy(asc(projects.name), asc(tasks.title))
+    .then((rows) => rows.filter((row): row is FleetTaskReasonOption => Boolean(row.propertyId)))
+}
+
+export async function createRequestWithTaskReason(
+  request: Omit<NewFleetRequest, 'taskId'>,
+  reason:
+    | { kind: 'existing'; taskId: string; propertyId: string }
+    | { kind: 'new'; title: string; projectId: string; propertyId: string },
+) {
+  return db.transaction(async (tx) => {
+    const [property] = await tx
+      .select({ id: properties.id })
+      .from(properties)
+      .where(and(eq(properties.id, reason.propertyId), eq(properties.orgId, request.orgId)))
+      .limit(1)
+    if (!property) throw new Error('Choose a property in this organization for the task')
+
+    let taskId: string
+
+    if (reason.kind === 'existing') {
+      const [task] = await tx
+        .select({ id: tasks.id })
+        .from(tasks)
+        .innerJoin(projects, eq(tasks.projectId, projects.id))
+        .where(and(
+          eq(tasks.id, reason.taskId),
+          eq(tasks.orgId, request.orgId),
+          eq(tasks.propertyId, reason.propertyId),
+          ne(tasks.status, 'done'),
+          eq(projects.status, 'active'),
+        ))
+        .limit(1)
+      if (!task) throw new Error('Choose an open task for the selected property')
+      taskId = task.id
+    } else {
+      const [project] = await tx
+        .select({ id: projects.id })
+        .from(projects)
+        .where(and(eq(projects.id, reason.projectId), eq(projects.orgId, request.orgId), eq(projects.status, 'active')))
+        .limit(1)
+      if (!project) throw new Error('Choose an active project for the new task')
+
+      const [task] = await tx.insert(tasks).values({
+        orgId: request.orgId,
+        projectId: project.id,
+        title: reason.title,
+        propertyId: reason.propertyId,
+        createdBy: request.requestedBy,
+      }).returning()
+      await tx.insert(taskAssignees).values({ taskId: task.id, profileId: request.requestedBy })
+      taskId = task.id
+    }
+
+    const [created] = await tx.insert(fleetRequests).values({ ...request, taskId }).returning()
+    return created
+  })
 }
 
 export async function updateRequest(id: string, data: Partial<NewFleetRequest>) {

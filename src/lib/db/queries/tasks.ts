@@ -1,6 +1,7 @@
-import { eq, and, asc, desc, ilike, inArray, sql } from 'drizzle-orm'
+import { eq, and, asc, desc, ilike, inArray, or, sql } from 'drizzle-orm'
 import { db } from '..'
 import {
+  fleetRequests, fleetTripReports, issues, surveyQuestions, surveyResponses,
   tasks, taskTeams, taskAssignees, taskTeamLinks, properties, profiles,
   type Task, type NewTask, type TaskTeam,
 } from '../schema'
@@ -19,6 +20,25 @@ export interface TaskWithRelations extends Task {
   propertyName: string | null
   assignees: { id: string; fullName: string }[]
   teams: { id: string; name: string }[]
+  sourceIssue: {
+    id: string
+    title: string
+    status: 'open' | 'investigating' | 'closed'
+    questionText: string
+    responseScore: number
+  } | null
+  fleetReports: {
+    id: string
+    requestId: string
+    requestStatus: 'pending' | 'queued' | 'dispatched' | 'completed' | 'cancelled'
+    purpose: string | null
+    startDate: string
+    endDate: string
+    dueAt: Date
+    submittedAt: Date | null
+    summary: string | null
+    attachmentUrls: string[]
+  }[]
 }
 
 async function hydrate(rows: Task[]): Promise<TaskWithRelations[]> {
@@ -26,7 +46,7 @@ async function hydrate(rows: Task[]): Promise<TaskWithRelations[]> {
   const ids = rows.map((r) => r.id)
   const propIds = Array.from(new Set(rows.map((r) => r.propertyId).filter(Boolean))) as string[]
 
-  const [assigneeRows, teamRows, propRows] = await Promise.all([
+  const [assigneeRows, teamRows, propRows, issueRows, reportRows] = await Promise.all([
     db.select({ taskId: taskAssignees.taskId, id: profiles.id, fullName: profiles.fullName })
       .from(taskAssignees)
       .innerJoin(profiles, eq(taskAssignees.profileId, profiles.id))
@@ -38,6 +58,36 @@ async function hydrate(rows: Task[]): Promise<TaskWithRelations[]> {
     propIds.length
       ? db.select({ id: properties.id, name: properties.name }).from(properties).where(inArray(properties.id, propIds))
       : Promise.resolve([] as { id: string; name: string }[]),
+    db.select({
+      taskId: issues.taskId,
+      id: issues.id,
+      title: issues.title,
+      status: issues.status,
+      questionText: surveyQuestions.text,
+      responseScore: surveyResponses.score,
+    })
+      .from(issues)
+      .innerJoin(surveyQuestions, eq(issues.questionId, surveyQuestions.id))
+      .innerJoin(surveyResponses, eq(issues.responseId, surveyResponses.id))
+      .where(inArray(issues.taskId, ids)),
+    db.select({
+      id: fleetTripReports.id,
+      reportTaskId: fleetTripReports.taskId,
+      requestId: fleetRequests.id,
+      requestTaskId: fleetRequests.taskId,
+      requestStatus: fleetRequests.status,
+      purpose: fleetRequests.purpose,
+      startDate: fleetRequests.startDate,
+      endDate: fleetRequests.endDate,
+      dueAt: fleetTripReports.dueAt,
+      submittedAt: fleetTripReports.submittedAt,
+      summary: fleetTripReports.summary,
+      attachmentUrls: fleetTripReports.attachmentUrls,
+    })
+      .from(fleetTripReports)
+      .innerJoin(fleetRequests, eq(fleetTripReports.requestId, fleetRequests.id))
+      .where(or(inArray(fleetTripReports.taskId, ids), inArray(fleetRequests.taskId, ids)))
+      .orderBy(desc(fleetTripReports.createdAt)),
   ])
 
   const aByTask = new Map<string, { id: string; fullName: string }[]>()
@@ -51,12 +101,44 @@ async function hydrate(rows: Task[]): Promise<TaskWithRelations[]> {
     arr.push({ id: t.id, name: t.name }); tByTask.set(t.taskId, arr)
   }
   const propName = new Map(propRows.map((p) => [p.id, p.name]))
+  const issueByTask = new Map(
+    issueRows
+      .filter((issue): issue is typeof issue & { taskId: string } => issue.taskId !== null)
+      .map((issue) => [issue.taskId, {
+        id: issue.id,
+        title: issue.title,
+        status: issue.status,
+        questionText: issue.questionText,
+        responseScore: issue.responseScore,
+      }]),
+  )
+  const reportsByTask = new Map<string, TaskWithRelations['fleetReports']>()
+  for (const report of reportRows) {
+    const taskId = report.reportTaskId ?? report.requestTaskId
+    if (!taskId) continue
+    const list = reportsByTask.get(taskId) ?? []
+    list.push({
+      id: report.id,
+      requestId: report.requestId,
+      requestStatus: report.requestStatus,
+      purpose: report.purpose,
+      startDate: report.startDate,
+      endDate: report.endDate,
+      dueAt: report.dueAt,
+      submittedAt: report.submittedAt,
+      summary: report.summary,
+      attachmentUrls: report.attachmentUrls,
+    })
+    reportsByTask.set(taskId, list)
+  }
 
   return rows.map((r) => ({
     ...r,
     propertyName: r.propertyId ? propName.get(r.propertyId) ?? null : null,
     assignees: aByTask.get(r.id) ?? [],
     teams: tByTask.get(r.id) ?? [],
+    sourceIssue: issueByTask.get(r.id) ?? null,
+    fleetReports: reportsByTask.get(r.id) ?? [],
   }))
 }
 

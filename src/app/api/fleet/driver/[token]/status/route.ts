@@ -8,6 +8,7 @@ import {
   markDispatchStarted,
   markStopArrived,
 } from '@/lib/db/queries/dispatches'
+import { ensureTripReportsForDispatch } from '@/lib/db/queries/fleet-trip-reports'
 import { notify } from '@/lib/fleet/push'
 
 export const dynamic = 'force-dynamic'
@@ -76,6 +77,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     // being read-then-discarded.
     const completed = await completeDispatch(body.dispatchId, driver.id)
     if (!completed) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    await ensureTripReportsForDispatch(body.dispatchId, completed.completedAt ?? new Date())
     const full = await getDispatchWithStops(body.dispatchId)
 
     // Notifications are best-effort and run AFTER completeDispatch has
@@ -102,7 +104,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
           profileId: req.requestedBy,
           type: 'trip_completed',
           title: 'Trip completed',
-          body: `${driver.fullName} has completed your trip.`,
+          body: `${driver.fullName} has completed your trip. Please submit your trip report within 72 hours.`,
           linkUrl: `${APP_URL}/fleet`,
         })
       }

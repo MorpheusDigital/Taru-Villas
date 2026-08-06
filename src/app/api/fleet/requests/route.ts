@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getProfile } from '@/lib/auth/guards'
 import { listVehicles } from '@/lib/db/queries/fleet'
-import { createRequest, listRequests } from '@/lib/db/queries/dispatches'
+import { createRequestWithTaskReason, listRequests } from '@/lib/db/queries/dispatches'
 import { validateFleetRequest } from '@/lib/fleet/constraints'
 
 const createSchema = z
@@ -19,6 +19,10 @@ const createSchema = z
     cargoRequired: z.boolean().default(false),
     purpose: z.string().max(1000).nullable().optional(),
     notes: z.string().max(2000).nullable().optional(),
+    taskReason: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('existing'), taskId: z.string().uuid(), propertyId: z.string().uuid() }),
+      z.object({ kind: z.literal('new'), title: z.string().trim().min(1, 'Task title is required').max(500), projectId: z.string().uuid(), propertyId: z.string().uuid() }),
+    ]),
   })
   .refine((d) => d.endDate >= d.startDate, {
     message: 'End date cannot be before the start date',
@@ -40,6 +44,10 @@ const createSchema = z
     message: 'Enter a pick-up location',
     path: ['originText'],
   })
+  .refine(
+    (d) => d.taskReason.propertyId === (d.requestType === 'visit' ? d.targetPropertyId : d.taskReason.propertyId),
+    { message: 'The selected task must belong to the visit property', path: ['taskReason', 'propertyId'] },
+  )
 
 export async function GET(request: NextRequest) {
   try {
@@ -103,7 +111,12 @@ export async function POST(request: NextRequest) {
     )
     if (!check.ok) return NextResponse.json({ error: check.error }, { status: 400 })
 
-    const created = await createRequest({
+    const taskPropertyId = data.taskReason.propertyId
+    if (data.requestType === 'visit' && taskPropertyId !== data.targetPropertyId) {
+      return NextResponse.json({ error: 'The selected task must belong to the visit property' }, { status: 400 })
+    }
+
+    const created = await createRequestWithTaskReason({
       orgId: profile.orgId,
       requestType: data.requestType,
       requestedBy: profile.id,
@@ -118,10 +131,20 @@ export async function POST(request: NextRequest) {
       cargoRequired: data.cargoRequired,
       purpose: data.purpose ?? null,
       notes: data.notes ?? null,
-    })
+    }, data.taskReason)
     return NextResponse.json(created, { status: 201 })
   } catch (error) {
     console.error('POST /api/fleet/requests error:', error)
+    if (
+      error instanceof Error &&
+      [
+        'Choose a property in this organization for the task',
+        'Choose an open task for the selected property',
+        'Choose an active project for the new task',
+      ].includes(error.message)
+    ) {
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
     return NextResponse.json({ error: 'Failed to create request' }, { status: 500 })
   }
 }

@@ -3,12 +3,15 @@ import { alias } from 'drizzle-orm/pg-core'
 import { db } from '..'
 import {
   issues,
+  projects,
   properties,
   profiles,
   surveyQuestions,
   surveySubmissions,
   surveyResponses,
   propertyAssignments,
+  taskAssignees,
+  tasks,
   type NewIssue,
 } from '../schema'
 
@@ -22,7 +25,8 @@ const submitterProfiles = alias(profiles, 'submitter_profiles')
 /**
  * For each response with score <= 6 and an issueDescription, create an issue.
  * Looks up question text for title, property's primaryPmId for assignment,
- * and checks for repeat issues (existing closed issues with same questionId + propertyId).
+ * checks for repeat issues (existing closed issues with same questionId + propertyId),
+ * and creates a linked task in the shared Survey Issues project.
  */
 export async function createIssuesFromSubmission(
   submissionId: string,
@@ -41,53 +45,90 @@ export async function createIssuesFromSubmission(
 
   if (lowScoreResponses.length === 0) return []
 
-  // Look up question texts
-  const questionIds = lowScoreResponses.map((r) => r.questionId)
-  const questionRows = await db
-    .select({ id: surveyQuestions.id, text: surveyQuestions.text })
-    .from(surveyQuestions)
-    .where(inArray(surveyQuestions.id, questionIds))
+  return db.transaction(async (tx) => {
+    // Look up question texts
+    const questionIds = lowScoreResponses.map((r) => r.questionId)
+    const questionRows = await tx
+      .select({ id: surveyQuestions.id, text: surveyQuestions.text })
+      .from(surveyQuestions)
+      .where(inArray(surveyQuestions.id, questionIds))
 
-  const questionTextMap = new Map(questionRows.map((q) => [q.id, q.text]))
+    const questionTextMap = new Map(questionRows.map((q) => [q.id, q.text]))
 
-  // Look up property's primary PM
-  const [prop] = await db
-    .select({ primaryPmId: properties.primaryPmId })
-    .from(properties)
-    .where(eq(properties.id, propertyId))
-    .limit(1)
+    // Look up property's primary PM
+    const [prop] = await tx
+      .select({ primaryPmId: properties.primaryPmId })
+      .from(properties)
+      .where(eq(properties.id, propertyId))
+      .limit(1)
 
-  const assignedTo = prop?.primaryPmId ?? null
+    const assignedTo = prop?.primaryPmId ?? null
 
-  // Check for repeat issues: existing closed issues with same questionId + propertyId
-  const existingClosedIssues = await db
-    .select({ questionId: issues.questionId })
-    .from(issues)
-    .where(
-      and(
-        eq(issues.propertyId, propertyId),
-        eq(issues.status, 'closed'),
-        inArray(issues.questionId, questionIds)
+    // Check for repeat issues: existing closed issues with same questionId + propertyId
+    const existingClosedIssues = await tx
+      .select({ questionId: issues.questionId })
+      .from(issues)
+      .where(
+        and(
+          eq(issues.propertyId, propertyId),
+          eq(issues.status, 'closed'),
+          inArray(issues.questionId, questionIds)
+        )
       )
-    )
 
-  const repeatQuestionIds = new Set(existingClosedIssues.map((i) => i.questionId))
+    const repeatQuestionIds = new Set(existingClosedIssues.map((i) => i.questionId))
 
-  // Insert issues
-  const newIssues: NewIssue[] = lowScoreResponses.map((r) => ({
-    orgId,
-    propertyId,
-    submissionId,
-    responseId: r.responseId,
-    questionId: r.questionId,
-    title: questionTextMap.get(r.questionId) ?? 'Issue flagged',
-    description: r.issueDescription!,
-    assignedTo,
-    isRepeatIssue: repeatQuestionIds.has(r.questionId),
-  }))
+    // Reuse the organization-wide project, creating it on the first survey issue.
+    const [createdProject] = await tx
+      .insert(projects)
+      .values({ orgId, name: 'Survey Issues', description: 'Tasks generated from internal survey issues.' })
+      .onConflictDoUpdate({
+        target: [projects.orgId, projects.name],
+        set: { status: 'active', updatedAt: new Date() },
+      })
+      .returning()
+    const project = createdProject
 
-  const inserted = await db.insert(issues).values(newIssues).returning()
-  return inserted
+    if (!project) throw new Error('Failed to create or find the Survey Issues project')
+
+    const inserted: typeof issues.$inferSelect[] = []
+    for (const response of lowScoreResponses) {
+      const title = questionTextMap.get(response.questionId) ?? 'Issue flagged'
+      const [issue] = await tx.insert(issues).values({
+        orgId,
+        propertyId,
+        submissionId,
+        responseId: response.responseId,
+        questionId: response.questionId,
+        title,
+        description: response.issueDescription!,
+        assignedTo,
+        isRepeatIssue: repeatQuestionIds.has(response.questionId),
+      } satisfies NewIssue).returning()
+
+      const [task] = await tx.insert(tasks).values({
+        orgId,
+        projectId: project.id,
+        title,
+        description: response.issueDescription!,
+        propertyId,
+        createdBy: assignedTo,
+      }).returning()
+
+      if (assignedTo) {
+        await tx.insert(taskAssignees).values({ taskId: task.id, profileId: assignedTo })
+      }
+
+      const [linkedIssue] = await tx
+        .update(issues)
+        .set({ taskId: task.id, updatedAt: new Date() })
+        .where(eq(issues.id, issue.id))
+        .returning()
+      inserted.push(linkedIssue)
+    }
+
+    return inserted
+  })
 }
 
 // ---------------------------------------------------------------------------

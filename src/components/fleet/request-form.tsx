@@ -22,6 +22,8 @@ import { validateFleetRequest } from '@/lib/fleet/constraints'
 import type { EngineVehicle } from '@/lib/fleet/types'
 import type { Property, Vehicle } from '@/lib/db/schema'
 import type { listRequests } from '@/lib/db/queries/dispatches'
+import type { FleetTaskReasonOption } from '@/lib/db/queries/dispatches'
+import type { ProjectWithCounts } from '@/lib/db/queries/projects'
 
 /** Row shape produced by listRequests — shared with requests-table.tsx. */
 export type FleetRequestRow = Awaited<ReturnType<typeof listRequests>>[number]
@@ -47,16 +49,23 @@ interface RequestFormValues {
   cargoRequired: boolean
   purpose: string
   notes: string
+  taskReasonKind: 'existing' | 'new'
+  taskId: string
+  taskPropertyId: string
+  taskTitle: string
+  taskProjectId: string
 }
 
 interface RequestFormProps {
   request?: FleetRequestRow | null
   vehicles: Vehicle[]
   properties: Property[]
+  projects: ProjectWithCounts[]
+  eligibleTasks: FleetTaskReasonOption[]
   onSuccess?: () => void
 }
 
-export function RequestForm({ request, vehicles, properties, onSuccess }: RequestFormProps) {
+export function RequestForm({ request, vehicles, properties, projects, eligibleTasks, onSuccess }: RequestFormProps) {
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const isEditing = !!request
@@ -95,6 +104,11 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
       cargoRequired: request?.cargoRequired ?? false,
       purpose: request?.purpose ?? '',
       notes: request?.notes ?? '',
+      taskReasonKind: 'existing',
+      taskId: '',
+      taskPropertyId: '',
+      taskTitle: '',
+      taskProjectId: projects[0]?.id ?? '',
     },
   })
 
@@ -102,6 +116,15 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
   const cargoRequired = watch('cargoRequired')
   const paxCount = watch('paxCount')
   const originSelection = watch('originSelection')
+  const taskReasonKind = watch('taskReasonKind')
+  const taskPropertyId = watch('taskPropertyId')
+  const targetPropertyId = watch('targetPropertyId')
+
+  const effectiveTaskPropertyId = requestType === 'visit' ? targetPropertyId : taskPropertyId
+  const eligibleTasksForProperty = useMemo(
+    () => eligibleTasks.filter((task) => task.propertyId === effectiveTaskPropertyId),
+    [eligibleTasks, effectiveTaskPropertyId],
+  )
 
   // `properties` is active-only (correct for creating a new request — nobody
   // should book a visit to a closed property). But when editing an existing
@@ -196,6 +219,19 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
         cargoRequired: values.cargoRequired,
         purpose: values.requestType === 'visit' ? (values.purpose.trim() || null) : null,
         notes: values.notes.trim() || null,
+        ...(isEditing
+          ? {}
+          : {
+              taskReason:
+                values.taskReasonKind === 'existing'
+                  ? { kind: 'existing' as const, taskId: values.taskId, propertyId: effectiveTaskPropertyId }
+                  : {
+                      kind: 'new' as const,
+                      title: values.taskTitle.trim(),
+                      projectId: values.taskProjectId,
+                      propertyId: effectiveTaskPropertyId,
+                    },
+            }),
       }
 
       const res = await fetch(
@@ -325,6 +361,100 @@ export function RequestForm({ request, vehicles, properties, onSuccess }: Reques
           </div>
         </TabsContent>
       </Tabs>
+
+      {!isEditing && (
+        <div className="space-y-3 rounded-lg border p-4">
+          <div>
+            <Label>Task reason</Label>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Link this trip to an open task, or create one for the selected property.
+            </p>
+          </div>
+
+          {requestType === 'standalone' && (
+            <div className="space-y-2">
+              <Label>Task property</Label>
+              <Controller
+                control={control}
+                name="taskPropertyId"
+                rules={{
+                  validate: (v) =>
+                    getValues('requestType') !== 'standalone' ||
+                    Boolean(v) ||
+                    'Select the property this trip supports',
+                }}
+                render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger className="w-full"><SelectValue placeholder="Select a property" /></SelectTrigger>
+                    <SelectContent>
+                      {properties.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {errors.taskPropertyId && <p className="text-sm text-destructive">{errors.taskPropertyId.message}</p>}
+            </div>
+          )}
+
+          <Controller
+            control={control}
+            name="taskReasonKind"
+            render={({ field }) => (
+              <Select value={field.value} onValueChange={(value) => field.onChange(value as 'existing' | 'new')}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="existing">Use an existing open task</SelectItem>
+                  <SelectItem value="new">Create a new task</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          />
+
+          {taskReasonKind === 'existing' ? (
+            <div className="space-y-2">
+              <Controller
+                control={control}
+                name="taskId"
+                rules={{ validate: (v) => Boolean(v) || 'Select an open task' }}
+                render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange} disabled={!effectiveTaskPropertyId}>
+                    <SelectTrigger className="w-full"><SelectValue placeholder={effectiveTaskPropertyId ? 'Select an open task' : 'Select the property first'} /></SelectTrigger>
+                    <SelectContent>
+                      {eligibleTasksForProperty.map((task) => (
+                        <SelectItem key={task.id} value={task.id}>{task.title} — {task.projectName}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {effectiveTaskPropertyId && eligibleTasksForProperty.length === 0 && (
+                <p className="text-sm text-muted-foreground">No eligible tasks for this property. Create a new one instead.</p>
+              )}
+              {errors.taskId && <p className="text-sm text-destructive">{errors.taskId.message}</p>}
+            </div>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="fleet-task-title">New task title</Label>
+                <Input id="fleet-task-title" maxLength={500} placeholder="What this trip supports" {...register('taskTitle', {
+                  validate: (v) => taskReasonKind !== 'new' || Boolean(v.trim()) || 'Task title is required',
+                })} />
+                {errors.taskTitle && <p className="text-sm text-destructive">{errors.taskTitle.message}</p>}
+              </div>
+              <div className="space-y-2">
+                <Label>Project</Label>
+                <Controller control={control} name="taskProjectId" rules={{ validate: (v) => taskReasonKind !== 'new' || Boolean(v) || 'Select an active project' }} render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger className="w-full"><SelectValue placeholder="Select an active project" /></SelectTrigger>
+                    <SelectContent>{projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                )} />
+                {errors.taskProjectId && <p className="text-sm text-destructive">{errors.taskProjectId.message}</p>}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       <div className="space-y-2">
         <Label>Pick-up</Label>

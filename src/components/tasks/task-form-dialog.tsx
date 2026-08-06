@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useForm, Controller } from 'react-hook-form'
 import { toast } from 'sonner'
+import { format } from 'date-fns'
 
 import type { TaskWithRelations } from '@/lib/db/queries/tasks'
 import {
@@ -20,6 +22,8 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Badge } from '@/components/ui/badge'
+import { Separator } from '@/components/ui/separator'
 import {
   Dialog,
   DialogContent,
@@ -91,6 +95,12 @@ function multiLabel(count: number, singular: string, plural: string): string {
   if (count === 0) return `No ${plural}`
   if (count === 1) return `1 ${singular}`
   return `${count} ${plural}`
+}
+
+function reportStatus(report: TaskWithRelations['fleetReports'][number]) {
+  if (report.submittedAt) return { label: 'Submitted', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' }
+  if (new Date(report.dueAt) < new Date()) return { label: 'Overdue', className: 'bg-red-100 text-red-700 border-red-200' }
+  return { label: 'Pending', className: 'bg-amber-100 text-amber-700 border-amber-200' }
 }
 
 // ---------------------------------------------------------------------------
@@ -228,7 +238,7 @@ export function TaskFormDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{isEditing ? 'Edit Task' : 'Create Task'}</DialogTitle>
           </DialogHeader>
@@ -368,6 +378,72 @@ export function TaskFormDialog({
                 {...register('dueDate')}
               />
             </div>
+
+            {isEditing && (task.sourceIssue || task.fleetReports.length > 0) && (
+              <>
+                <Separator />
+
+                {task.sourceIssue && (
+                  <section className="space-y-2" aria-label="Source survey issue">
+                    <div className="flex items-center justify-between gap-3">
+                      <Label>Source survey issue</Label>
+                      <Link
+                        href={`/issues/${task.sourceIssue.id}`}
+                        className="text-xs font-medium text-primary hover:underline"
+                      >
+                        View issue
+                      </Link>
+                    </div>
+                    <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="font-medium">{task.sourceIssue.title}</p>
+                        <Badge variant="secondary" className="capitalize">{task.sourceIssue.status}</Badge>
+                      </div>
+                      <p className="mt-1 text-muted-foreground">{task.sourceIssue.questionText}</p>
+                      <p className="mt-2 text-xs text-muted-foreground">Survey score: {task.sourceIssue.responseScore}/10</p>
+                    </div>
+                  </section>
+                )}
+
+                {task.fleetReports.length > 0 && (
+                  <section className="space-y-2" aria-label="Linked fleet report history">
+                    <Label>Linked fleet report history</Label>
+                    <div className="space-y-2">
+                      {task.fleetReports.map((report) => {
+                        const status = reportStatus(report)
+                        return (
+                          <div key={report.id} className="rounded-md border p-3 text-sm">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div>
+                                <p className="font-medium">Fleet request #{report.requestId.slice(0, 8)}</p>
+                                <p className="text-xs text-muted-foreground capitalize">Request status: {report.requestStatus}</p>
+                              </div>
+                              <Badge variant="outline" className={status.className}>{status.label}</Badge>
+                            </div>
+                            {report.purpose && <p className="mt-2 text-muted-foreground">{report.purpose}</p>}
+                            <p className="mt-2 text-xs text-muted-foreground">
+                              Trip: {format(new Date(report.startDate), 'd MMM yyyy')} – {format(new Date(report.endDate), 'd MMM yyyy')}
+                            </p>
+                            <p className="text-xs text-muted-foreground">Due: {format(new Date(report.dueAt), 'd MMM yyyy, p')}</p>
+                            {report.submittedAt && <p className="text-xs text-muted-foreground">Submitted: {format(new Date(report.submittedAt), 'd MMM yyyy, p')}</p>}
+                            {report.summary && <p className="mt-2 whitespace-pre-wrap">{report.summary}</p>}
+                            {report.attachmentUrls.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                                {report.attachmentUrls.map((url, index) => (
+                                  <a key={url} href={url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                                    Attachment {index + 1}
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </section>
+                )}
+              </>
+            )}
 
             {/* Assignees multi-select */}
             <div className="space-y-1.5">
