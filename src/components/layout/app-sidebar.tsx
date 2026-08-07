@@ -11,7 +11,6 @@ import {
   LogOut,
   ChevronsUpDown,
   ListTodo,
-  AlertTriangle,
   Compass,
   UtensilsCrossed,
   ListChecks,
@@ -65,7 +64,6 @@ interface NavItem {
 const mainNavItems: NavItem[] = [
   { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { title: 'Surveys', href: '/surveys', icon: ClipboardCheck },
-  { title: 'Issues', href: '/issues', icon: AlertTriangle },
   { title: 'Task Manager', href: '/tasks', icon: ListTodo },
   { title: 'SOPs', href: '/sops', icon: ListChecks },
   { title: 'Utilities', href: '/utilities', icon: Gauge },
@@ -136,8 +134,6 @@ export function AppSidebar() {
     router.push('/login')
   }
 
-  const showIssuesNav =
-    profile.role === 'admin' || profile.role === 'property_manager'
   const showPropertySection =
     profile.role === 'property_manager' || profile.role === 'admin'
   const showAdminSection = profile.role === 'admin'
@@ -148,7 +144,6 @@ export function AppSidebar() {
 
   const visibleMainNavItems = mainNavItems.filter((item) => {
     if (item.href === '/dashboard') return showAdminSection
-    if (item.href === '/issues') return showIssuesNav
     return true
   })
 
