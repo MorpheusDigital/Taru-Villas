@@ -15,8 +15,7 @@ import {
   UtensilsCrossed,
   ListChecks,
   ShieldCheck,
-  Gauge,
-  Trash2,
+  ClipboardList,
   UserCheck,
   Package,
 } from 'lucide-react'
@@ -66,8 +65,7 @@ const mainNavItems: NavItem[] = [
   { title: 'Surveys', href: '/surveys', icon: ClipboardCheck },
   { title: 'Task Manager', href: '/tasks', icon: ListTodo },
   { title: 'SOPs', href: '/sops', icon: ListChecks },
-  { title: 'Utilities', href: '/utilities', icon: Gauge },
-  { title: 'Daily Wastage', href: '/waste', icon: Trash2 },
+  { title: 'Daily Records', href: '/daily-records', icon: ClipboardList },
   { title: 'Asset Registry', href: '/assets', icon: Package },
   { title: 'Settings', href: '/settings', icon: Settings },
 ]

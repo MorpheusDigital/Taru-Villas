@@ -54,9 +54,16 @@ interface WasteLogEntry {
 interface WastePageClientProps {
   property: { id: string; name: string; code: string; slug: string }
   isAdmin: boolean
+  showHeader?: boolean
+  embedded?: boolean
 }
 
-export function WastePageClient({ property, isAdmin }: WastePageClientProps) {
+export function WastePageClient({
+  property,
+  isAdmin,
+  showHeader = true,
+  embedded = false,
+}: WastePageClientProps) {
   const router = useRouter()
   const now = new Date()
   const [year, setYear] = useState(now.getFullYear())
@@ -91,53 +98,59 @@ export function WastePageClient({ property, isAdmin }: WastePageClientProps) {
   ]
   const yearOptions = Array.from({ length: 3 }, (_, i) => now.getFullYear() - i)
 
+  const dateControls = (
+    <div className="flex items-center gap-2">
+      <Select value={String(month)} onValueChange={(v) => setMonth(parseInt(v))}>
+        <SelectTrigger className="w-[140px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {monthNames.map((name, i) => (
+            <SelectItem key={i + 1} value={String(i + 1)}>
+              {name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <Select value={String(year)} onValueChange={(v) => setYear(parseInt(v))}>
+        <SelectTrigger className="w-[100px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {yearOptions.map((y) => (
+            <SelectItem key={y} value={String(y)}>
+              {y}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+
   return (
-    <div className="space-y-6 p-6">
+    <div className={embedded ? 'space-y-6' : 'space-y-6 p-6'}>
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => router.push('/waste')}>
-            <ArrowLeft className="size-4" />
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              Daily Wastage — {property.name}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Log daily waste by category and monitor trends
-            </p>
+      {showHeader ? (
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" onClick={() => router.push('/daily-records')}>
+              <ArrowLeft className="size-4" />
+            </Button>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">
+                Daily Wastage — {property.name}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Log daily waste by category and monitor trends
+              </p>
+            </div>
           </div>
+          {dateControls}
         </div>
-
-        {/* Month / Year controls */}
-        <div className="flex items-center gap-2">
-          <Select value={String(month)} onValueChange={(v) => setMonth(parseInt(v))}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {monthNames.map((name, i) => (
-                <SelectItem key={i + 1} value={String(i + 1)}>
-                  {name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={String(year)} onValueChange={(v) => setYear(parseInt(v))}>
-            <SelectTrigger className="w-[100px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {yearOptions.map((y) => (
-                <SelectItem key={y} value={String(y)}>
-                  {y}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      ) : (
+        <div className="flex justify-end">{dateControls}</div>
+      )}
 
       {/* Summary Cards */}
       <WasteSummaryCards summary={summary?.summary ?? null} loading={loading} />

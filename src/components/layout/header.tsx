@@ -31,6 +31,7 @@ const segmentLabels: Record<string, string> = {
   'allowed-emails': 'Allowed Emails',
   utilities: 'Utilities',
   waste: 'Daily Wastage',
+  'daily-records': 'Daily Records',
   'guest-profiles': 'Guest Profiles',
   tasks: 'Task Manager',
   teams: 'Teams',

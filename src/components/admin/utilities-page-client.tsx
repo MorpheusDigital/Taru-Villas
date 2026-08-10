@@ -19,6 +19,10 @@ import { BulkImportCard } from '@/components/admin/bulk-import-card'
 interface UtilitiesPageClientProps {
   property: { id: string; name: string; code: string; slug: string }
   isAdmin: boolean
+  initialUtilityType?: 'water' | 'electricity'
+  showHeader?: boolean
+  showUtilityTabs?: boolean
+  embedded?: boolean
 }
 
 interface SummaryData {
@@ -89,9 +93,16 @@ interface ReadingEntry {
   updatedAt: string
 }
 
-export function UtilitiesPageClient({ property, isAdmin }: UtilitiesPageClientProps) {
+export function UtilitiesPageClient({
+  property,
+  isAdmin,
+  initialUtilityType = 'water',
+  showHeader = true,
+  showUtilityTabs = true,
+  embedded = false,
+}: UtilitiesPageClientProps) {
   const router = useRouter()
-  const [utilityType, setUtilityType] = useState<'water' | 'electricity'>('water')
+  const [utilityType, setUtilityType] = useState<'water' | 'electricity'>(initialUtilityType)
   const [range, setRange] = useState<{ from: string; to: string; isThisMonth: boolean } | null>(null)
   const [summary, setSummary] = useState<SummaryData | null>(null)
   const [readings, setReadings] = useState<ReadingEntry[]>([])
@@ -196,72 +207,94 @@ export function UtilitiesPageClient({ property, isAdmin }: UtilitiesPageClientPr
     </div>
   )
 
+  const rangeSelector = (
+    <UtilityRangeSelector
+      onChange={(r) => setRange({ from: r.from, to: r.to, isThisMonth: r.isThisMonth })}
+    />
+  )
+
+  const publicLinkButton = (
+    <Button
+      variant="outline"
+      size="sm"
+      className="w-full justify-center sm:w-auto"
+      onClick={() => {
+        const url = `${window.location.origin}/u/${property.slug}`
+        navigator.clipboard.writeText(url)
+        toast.success('Public link copied to clipboard')
+      }}
+    >
+      <Link2 className="size-4" />
+      Copy Public Link
+    </Button>
+  )
+
+  const content = showUtilityTabs ? (
+    <Tabs
+      value={utilityType}
+      onValueChange={(v) => setUtilityType(v as 'water' | 'electricity')}
+    >
+      <TabsList>
+        <TabsTrigger value="water" className="gap-2">
+          <Droplets className="size-4" />
+          Water
+        </TabsTrigger>
+        <TabsTrigger value="electricity" className="gap-2">
+          <Zap className="size-4" />
+          Electricity
+        </TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="water" className="mt-6">
+        {tabContent}
+      </TabsContent>
+
+      <TabsContent value="electricity" className="mt-6">
+        {tabContent}
+      </TabsContent>
+    </Tabs>
+  ) : tabContent
+
   return (
-    <div className="space-y-6 p-6">
+    <div className={embedded ? 'space-y-6' : 'space-y-6 p-6'}>
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => router.push('/utilities')}
-          >
-            <ArrowLeft className="size-4" />
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              Utilities — {property.name}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Track meter readings and monitor utility costs
-            </p>
+      {showHeader && (
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => router.push('/daily-records')}
+            >
+              <ArrowLeft className="size-4" />
+            </Button>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">
+                Utilities — {property.name}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Track meter readings and monitor utility costs
+              </p>
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-2">
+            {publicLinkButton}
+
+            {rangeSelector}
           </div>
         </div>
+      )}
 
-        {/* Controls */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full justify-center sm:w-auto"
-            onClick={() => {
-              const url = `${window.location.origin}/u/${property.slug}`
-              navigator.clipboard.writeText(url)
-              toast.success('Public link copied to clipboard')
-            }}
-          >
-            <Link2 className="size-4" />
-            Copy Public Link
-          </Button>
-
-          <UtilityRangeSelector onChange={(r) => setRange({ from: r.from, to: r.to, isThisMonth: r.isThisMonth })} />
+      {!showHeader && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          {publicLinkButton}
+          {rangeSelector}
         </div>
-      </div>
+      )}
 
-      {/* Utility Type Tabs */}
-      <Tabs
-        value={utilityType}
-        onValueChange={(v) => setUtilityType(v as 'water' | 'electricity')}
-      >
-        <TabsList>
-          <TabsTrigger value="water" className="gap-2">
-            <Droplets className="size-4" />
-            Water
-          </TabsTrigger>
-          <TabsTrigger value="electricity" className="gap-2">
-            <Zap className="size-4" />
-            Electricity
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="water" className="mt-6">
-          {tabContent}
-        </TabsContent>
-
-        <TabsContent value="electricity" className="mt-6">
-          {tabContent}
-        </TabsContent>
-      </Tabs>
+      {content}
     </div>
   )
 }
