@@ -6,7 +6,6 @@ import type {
   Assignment,
   DutyCode,
   EngineEmployee,
-  EngineRole,
   GenerationInput,
   GenerationResult,
   IsoDate,

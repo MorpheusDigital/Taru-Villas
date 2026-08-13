@@ -1,6 +1,7 @@
 import {
   and,
   asc,
+  desc,
   eq,
   gte,
   inArray,
@@ -373,6 +374,7 @@ export async function buildGenerationInput(
           date: rosterAssignments.assignmentDate,
           workingMinutes: rosterAssignments.workingMinutes,
           dutyCode: rosterAssignments.dutyCode,
+          revision: rosterCycles.revision,
         })
         .from(rosterAssignments)
         .innerJoin(
@@ -391,7 +393,11 @@ export async function buildGenerationInput(
             inArray(rosterAssignments.assignmentDate, boundaryDates),
           ),
         )
-        .orderBy(asc(rosterParticipants.employeeId), asc(rosterAssignments.assignmentDate))
+        .orderBy(
+          asc(rosterParticipants.employeeId),
+          asc(rosterAssignments.assignmentDate),
+          desc(rosterCycles.revision),
+        )
     : []
   const manualBoundaryRows = employeeIds.length && boundaryDates.length
     ? await db
@@ -405,11 +411,17 @@ export async function buildGenerationInput(
         )
         .orderBy(asc(rosterBoundaryAssignments.employeeId), asc(rosterBoundaryAssignments.assignmentDate))
     : []
-  const publishedByKey = new Map(
-    publishedBoundaryRows
-      .filter((row): row is typeof row & { employeeId: string } => row.employeeId !== null)
-      .map((row) => [`${row.employeeId}/${row.date}`, row]),
-  )
+  const publishedByKey = new Map<
+    string,
+    (typeof publishedBoundaryRows)[number] & { employeeId: string }
+  >()
+  for (const row of publishedBoundaryRows) {
+    if (row.employeeId === null) continue
+    const key = `${row.employeeId}/${row.date}`
+    if (!publishedByKey.has(key)) {
+      publishedByKey.set(key, { ...row, employeeId: row.employeeId })
+    }
+  }
   const manualByKey = new Map(
     manualBoundaryRows.map((row) => [`${row.employeeId}/${row.assignmentDate}`, row]),
   )
