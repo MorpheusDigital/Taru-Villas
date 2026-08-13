@@ -172,7 +172,8 @@ export async function getCyclePreview(orgId: string, cycleId: string) {
           assignment.dutyPropertyId === demand.propertyId &&
           assignment.assignmentDate === demand.date &&
           assignment.roleId === demand.roleId &&
-          ['W', 'S'].includes(assignment.dutyCode),
+          ['W', 'S'].includes(assignment.dutyCode) &&
+          assignment.shiftTemplateId !== null,
       ).length,
     }))
 
