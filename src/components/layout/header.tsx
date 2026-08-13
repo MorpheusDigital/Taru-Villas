@@ -40,6 +40,8 @@ const segmentLabels: Record<string, string> = {
   vehicles: 'Vehicles',
   drivers: 'Drivers',
   distances: 'Distances',
+  rostering: 'Rostering',
+  approvals: 'Approvals',
 }
 
 function getPageTitle(pathname: string): string {

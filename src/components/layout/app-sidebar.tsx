@@ -18,6 +18,7 @@ import {
   ClipboardList,
   UserCheck,
   Package,
+  CalendarClock,
 } from 'lucide-react'
 
 import { useAuth } from '@/components/providers/auth-provider'
@@ -64,6 +65,7 @@ const mainNavItems: NavItem[] = [
   { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { title: 'Surveys', href: '/surveys', icon: ClipboardCheck },
   { title: 'Task Manager', href: '/tasks', icon: ListTodo },
+  { title: 'Rostering', href: '/rostering', icon: CalendarClock },
   { title: 'SOPs', href: '/sops', icon: ListChecks },
   { title: 'Daily Records', href: '/daily-records', icon: ClipboardList },
   { title: 'Asset Registry', href: '/assets', icon: Package },
@@ -142,6 +144,7 @@ export function AppSidebar() {
 
   const visibleMainNavItems = mainNavItems.filter((item) => {
     if (item.href === '/dashboard') return showAdminSection
+    if (item.href === '/rostering') return showPropertySection
     return true
   })
 
