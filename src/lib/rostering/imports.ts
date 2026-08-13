@@ -130,6 +130,20 @@ const contracts: Record<
   },
 }
 
+export function canCommitRosterImport(
+  type: RosterImportType,
+  role: 'admin' | 'property_manager' | 'staff',
+  accessiblePropertyIds: string[] | null,
+  targetPropertyIds: string[],
+): boolean {
+  if (role === 'admin') return true
+  if (role !== 'property_manager') return false
+  if (type === 'employees' || type === 'boundary') return false
+
+  const accessible = new Set(accessiblePropertyIds ?? [])
+  return targetPropertyIds.every((propertyId) => accessible.has(propertyId))
+}
+
 function parseCsv(csv: string): { records: string[][]; parseError: string | null } {
   const records: string[][] = []
   let record: string[] = []
@@ -458,6 +472,9 @@ export function previewRosterImport(
 
   const rows: RosterImportRow[] = []
   const keys = new Set<string>()
+  if (parsed.records.length <= 1) {
+    errors.push({ row: 1, field: 'csv', message: 'CSV has no data rows' })
+  }
   parsed.records.slice(1).forEach((values, index) => {
     const rowNumber = index + 2
     const before = errors.length

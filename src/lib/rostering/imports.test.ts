@@ -1,6 +1,37 @@
 import { describe, expect, it } from 'vitest'
 
-import { previewRosterImport } from './imports'
+import { canCommitRosterImport, previewRosterImport } from './imports'
+
+describe('canCommitRosterImport', () => {
+  it('reserves employee and boundary commits for admins', () => {
+    expect(canCommitRosterImport('employees', 'admin', null, ['property-a'])).toBe(true)
+    expect(
+      canCommitRosterImport('employees', 'property_manager', ['property-a'], ['property-a']),
+    ).toBe(false)
+    expect(
+      canCommitRosterImport('boundary', 'property_manager', ['property-a'], ['property-a']),
+    ).toBe(false)
+  })
+
+  it('limits manager forecast and unavailability commits to assigned properties', () => {
+    expect(
+      canCommitRosterImport(
+        'forecasts',
+        'property_manager',
+        ['property-a', 'property-b'],
+        ['property-b'],
+      ),
+    ).toBe(true)
+    expect(
+      canCommitRosterImport(
+        'unavailability',
+        'property_manager',
+        ['property-a'],
+        ['property-b'],
+      ),
+    ).toBe(false)
+  })
+})
 
 describe('previewRosterImport', () => {
   it('parses quoted employee fields and normalizes optional values', () => {
