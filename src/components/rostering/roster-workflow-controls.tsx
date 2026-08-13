@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   AlertTriangle,
   Check,
+  CopyPlus,
   Loader2,
   Send,
   ShieldCheck,
@@ -92,14 +93,15 @@ export function RosterWorkflowControls({
       })
       const result = (await response.json().catch(() => ({}))) as {
         error?: string
+        cycleId?: string
       }
       if (!response.ok) throw new Error(result.error ?? 'Roster action failed')
       toast.success(successMessage)
       router.refresh()
-      return true
+      return result
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Roster action failed')
-      return false
+      return null
     } finally {
       setWorkingKey(null)
     }
@@ -158,6 +160,16 @@ export function RosterWorkflowControls({
       {},
       'Roster published to staff',
     )
+  }
+
+  async function createRevision() {
+    const result = await postAction(
+      'revision',
+      `/api/rostering/cycles/${cycleId}/revision`,
+      {},
+      'Correction revision created',
+    )
+    if (result?.cycleId) router.push(`/rostering/${result.cycleId}`)
   }
 
   return (
@@ -231,6 +243,16 @@ export function RosterWorkflowControls({
                 Publish
               </Button>
             </div>
+          )}
+          {isAdmin && status === 'published' && (
+            <Button onClick={createRevision} disabled={workingKey !== null}>
+              {workingKey === 'revision' ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <CopyPlus />
+              )}
+              Create correction revision
+            </Button>
           )}
         </CardContent>
 

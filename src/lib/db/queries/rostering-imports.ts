@@ -12,6 +12,7 @@ import {
 import { db } from '..'
 import {
   properties,
+  profiles,
   rosterBoundaryAssignments,
   rosterCycles,
   rosterDepartments,
@@ -23,6 +24,7 @@ import {
   rosterRoles,
   rosters,
   rosterUnavailability,
+  rosterViolations,
 } from '../schema'
 
 export interface CommitRosterImportArgs {
@@ -73,6 +75,37 @@ async function appendImportEvents(
       ),
     )
   if (cycles.length === 0) return
+
+  await tx
+    .delete(rosterViolations)
+    .where(
+      and(
+        inArray(
+          rosterViolations.cycleId,
+          cycles.map((cycle) => cycle.id),
+        ),
+        eq(rosterViolations.ruleCode, 'SOURCE_DATA_CHANGED'),
+      ),
+    )
+    .returning()
+  await tx
+    .insert(rosterViolations)
+    .values(
+      cycles.map((cycle) => ({
+        cycleId: cycle.id,
+        ruleCode: 'SOURCE_DATA_CHANGED',
+        severity: 'hard' as const,
+        resolution: 'open' as const,
+        message:
+          'Approved source data changed after generation. Regenerate this draft before submission.',
+        evidence: {
+          batchId: batchId === 'manual' ? null : batchId,
+          type,
+          checksum: checksum === 'manual' ? null : checksum,
+        },
+      })),
+    )
+    .returning()
 
   await tx
     .insert(rosterEvents)
@@ -778,6 +811,7 @@ export async function getRosteringSetupDirectory(
           fullName: rosterEmployees.fullName,
           basePropertyId: rosterEmployees.basePropertyId,
           roleCode: rosterRoles.code,
+          profileId: rosterEmployees.profileId,
         })
         .from(rosterEmployees)
         .innerJoin(rosterRoles, eq(rosterRoles.id, rosterEmployees.roleId))
@@ -819,6 +853,92 @@ export async function getRosteringSetupDirectory(
     employees: employeeRows,
     unavailability: unavailabilityRows,
   }
+}
+
+export async function getRosterProfileLinkDirectory(orgId: string) {
+  const [employeeRows, profileRows] = await Promise.all([
+    db
+      .select({
+        id: rosterEmployees.id,
+        employeeNumber: rosterEmployees.employeeNumber,
+        fullName: rosterEmployees.fullName,
+        profileId: rosterEmployees.profileId,
+      })
+      .from(rosterEmployees)
+      .where(
+        and(
+          eq(rosterEmployees.orgId, orgId),
+          eq(rosterEmployees.isActive, true),
+        ),
+      )
+      .orderBy(asc(rosterEmployees.employeeNumber)),
+    db
+      .select({
+        id: profiles.id,
+        email: profiles.email,
+        fullName: profiles.fullName,
+        role: profiles.role,
+      })
+      .from(profiles)
+      .where(and(eq(profiles.orgId, orgId), eq(profiles.isActive, true)))
+      .orderBy(asc(profiles.email)),
+  ])
+  return { employees: employeeRows, profiles: profileRows }
+}
+
+export async function linkRosterEmployeeProfile(args: {
+  orgId: string
+  employeeId: string
+  profileId: string | null
+}) {
+  return db.transaction(async (tx) => {
+    const [employee] = await tx
+      .select({ id: rosterEmployees.id })
+      .from(rosterEmployees)
+      .where(
+        and(
+          eq(rosterEmployees.id, args.employeeId),
+          eq(rosterEmployees.orgId, args.orgId),
+        ),
+      )
+      .limit(1)
+      .for('update')
+    if (!employee) throw new Error('Employee not found')
+
+    if (args.profileId) {
+      const [profile] = await tx
+        .select({ id: profiles.id })
+        .from(profiles)
+        .where(
+          and(
+            eq(profiles.id, args.profileId),
+            eq(profiles.orgId, args.orgId),
+            eq(profiles.isActive, true),
+          ),
+        )
+        .limit(1)
+      if (!profile) throw new Error('Portal profile not found')
+
+      const [alreadyLinked] = await tx
+        .select({ id: rosterEmployees.id })
+        .from(rosterEmployees)
+        .where(eq(rosterEmployees.profileId, profile.id))
+        .limit(1)
+      if (alreadyLinked && alreadyLinked.id !== employee.id) {
+        throw new Error('Portal profile is already linked to another employee')
+      }
+    }
+
+    const [updated] = await tx
+      .update(rosterEmployees)
+      .set({ profileId: args.profileId, updatedAt: new Date() })
+      .where(eq(rosterEmployees.id, employee.id))
+      .returning({
+        id: rosterEmployees.id,
+        profileId: rosterEmployees.profileId,
+      })
+    return updated
+  })
 }
 
 export async function listForecastsForMonth(args: {

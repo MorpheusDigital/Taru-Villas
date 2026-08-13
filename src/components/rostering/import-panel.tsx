@@ -245,6 +245,12 @@ export function ImportPanel({
               This contract is admin-only. You may preview it, but cannot commit it.
             </p>
           )}
+          {type === 'employees' && (
+            <p className="text-sm text-muted-foreground">
+              The optional portal_email column is informational only. After import,
+              use Staff account links to explicitly connect an existing Portal user.
+            </p>
+          )}
 
           {preview && (
             <div className="space-y-4 rounded-xl border bg-muted/15 p-4">

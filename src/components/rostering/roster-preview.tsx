@@ -8,7 +8,9 @@ import {
   ArrowLeft,
   CalendarRange,
   CheckCircle2,
+  Download,
   Loader2,
+  Printer,
   RefreshCw,
   ShieldAlert,
 } from 'lucide-react'
@@ -229,12 +231,24 @@ export function RosterPreview({
             Policy {preview.cycle.policyVersionId.slice(0, 8)}
           </p>
         </div>
-        {preview.cycle.status === 'draft' && canManageWholeHub && (
-          <Button variant="outline" onClick={regenerate} disabled={isRegenerating}>
-            {isRegenerating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-            {isRegenerating ? 'Regenerating…' : 'Regenerate draft'}
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline">
+            <a href={`/api/rostering/cycles/${preview.cycle.id}/export`}>
+              <Download /> Export CSV
+            </a>
           </Button>
-        )}
+          <Button asChild variant="outline">
+            <Link href={`/rostering/${preview.cycle.id}/print`}>
+              <Printer /> Print
+            </Link>
+          </Button>
+          {preview.cycle.status === 'draft' && canManageWholeHub && (
+            <Button variant="outline" onClick={regenerate} disabled={isRegenerating}>
+              {isRegenerating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+              {isRegenerating ? 'Regenerating…' : 'Regenerate draft'}
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

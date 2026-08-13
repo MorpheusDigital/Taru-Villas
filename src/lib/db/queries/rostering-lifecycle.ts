@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 
 import { calculateDemand } from '../../rostering/demand'
 import { workWeekKey } from '../../rostering/dates'
@@ -6,6 +6,7 @@ import {
   validateAssignmentEdit,
   validateLifecycleVersion,
   validatePublicationReadiness,
+  validateRevisionCreation,
 } from '../../rostering/lifecycle'
 import type { GenerationInput } from '../../rostering/types'
 import { db } from '..'
@@ -750,5 +751,275 @@ export async function publishRosterCycle(args: {
     }
 
     return { version: nextVersion, status: 'published' as const }
+  })
+}
+
+export async function createRosterRevision(args: {
+  orgId: string
+  actorId: string
+  cycleId: string
+  expectedVersion: number
+}) {
+  return db.transaction(async (tx) => {
+    const [source] = await tx
+      .select()
+      .from(rosterCycles)
+      .where(
+        and(
+          eq(rosterCycles.id, args.cycleId),
+          eq(rosterCycles.orgId, args.orgId),
+        ),
+      )
+      .limit(1)
+      .for('update')
+    if (!source) {
+      throw new RosterLifecycleError('NOT_FOUND', 'Roster cycle not found.')
+    }
+
+    const [latest] = await tx
+      .select({ revision: rosterCycles.revision })
+      .from(rosterCycles)
+      .where(
+        and(
+          eq(rosterCycles.orgId, args.orgId),
+          eq(rosterCycles.hubId, source.hubId),
+          eq(rosterCycles.month, source.month),
+        ),
+      )
+      .orderBy(desc(rosterCycles.revision))
+      .limit(1)
+      .for('update')
+    const validation = validateRevisionCreation(
+      source.status,
+      source.version,
+      args.expectedVersion,
+      source.revision,
+      latest?.revision ?? source.revision,
+    )
+    if (!validation.ok) {
+      throw new RosterLifecycleError(validation.code, validation.message)
+    }
+
+    const [sourceChildren, snapshot, sourceParticipants, sourceAssignments] =
+      await Promise.all([
+        tx.select().from(rosters).where(eq(rosters.cycleId, source.id)),
+        tx
+          .select()
+          .from(rosterInputSnapshots)
+          .where(eq(rosterInputSnapshots.cycleId, source.id))
+          .limit(1),
+        tx
+          .select()
+          .from(rosterParticipants)
+          .where(eq(rosterParticipants.cycleId, source.id)),
+        tx
+          .select()
+          .from(rosterAssignments)
+          .where(eq(rosterAssignments.cycleId, source.id)),
+      ])
+    if (!snapshot[0]) {
+      throw new RosterLifecycleError(
+        'SNAPSHOT_MISSING',
+        'The published roster has no frozen input snapshot.',
+      )
+    }
+
+    const sourceAssignmentIds = sourceAssignments.map((row) => row.id)
+    const [sourceSegments, sourceViolations] = await Promise.all([
+      sourceAssignmentIds.length
+        ? tx
+            .select()
+            .from(rosterAssignmentSegments)
+            .where(
+              inArray(
+                rosterAssignmentSegments.assignmentId,
+                sourceAssignmentIds,
+              ),
+            )
+        : Promise.resolve([]),
+      tx
+        .select()
+        .from(rosterViolations)
+        .where(eq(rosterViolations.cycleId, source.id)),
+    ])
+
+    const [cycle] = await tx
+      .insert(rosterCycles)
+      .values({
+        orgId: source.orgId,
+        hubId: source.hubId,
+        month: source.month,
+        revision: source.revision + 1,
+        status: 'draft',
+        policyVersionId: source.policyVersionId,
+        version: 1,
+        createdBy: args.actorId,
+      })
+      .returning()
+    if (sourceChildren.length > 0) {
+      await tx
+        .insert(rosters)
+        .values(
+          sourceChildren.map((child) => ({
+            cycleId: cycle.id,
+            propertyId: child.propertyId,
+            status: 'draft' as const,
+          })),
+        )
+        .returning()
+    }
+    await tx
+      .insert(rosterInputSnapshots)
+      .values({
+        cycleId: cycle.id,
+        checksum: snapshot[0].checksum,
+        normalizedInput: snapshot[0].normalizedInput,
+      })
+      .returning()
+
+    const copiedParticipants = sourceParticipants.length
+      ? await tx
+          .insert(rosterParticipants)
+          .values(
+            sourceParticipants.map((participant) => ({
+              cycleId: cycle.id,
+              employeeId: participant.employeeId,
+              employeeNumber: participant.employeeNumber,
+              fullName: participant.fullName,
+              basePropertyId: participant.basePropertyId,
+              primaryRoleId: participant.primaryRoleId,
+              roleCode: participant.roleCode,
+              departmentCode: participant.departmentCode,
+              laborTier: participant.laborTier,
+              residencyType: participant.residencyType,
+              skillCodes: participant.skillCodes,
+            })),
+          )
+          .returning({
+            id: rosterParticipants.id,
+            employeeNumber: rosterParticipants.employeeNumber,
+          })
+      : []
+    const participantIdByNumber = new Map(
+      copiedParticipants.map((row) => [row.employeeNumber, row.id]),
+    )
+    const sourceParticipantById = new Map(
+      sourceParticipants.map((row) => [row.id, row]),
+    )
+
+    const copiedAssignments = sourceAssignments.length
+      ? await tx
+          .insert(rosterAssignments)
+          .values(
+            sourceAssignments.map((assignment) => ({
+              cycleId: cycle.id,
+              participantId: participantIdByNumber.get(
+                sourceParticipantById.get(assignment.participantId)!
+                  .employeeNumber,
+              )!,
+              assignmentDate: assignment.assignmentDate,
+              dutyCode: assignment.dutyCode,
+              dutyPropertyId: assignment.dutyPropertyId,
+              roleId: assignment.roleId,
+              shiftTemplateId: assignment.shiftTemplateId,
+              scheduledMinutes: assignment.scheduledMinutes,
+              breakMinutes: assignment.breakMinutes,
+              workingMinutes: assignment.workingMinutes,
+              source: assignment.source,
+              explanation: assignment.explanation,
+              reasonCodes: assignment.reasonCodes,
+            })),
+          )
+          .returning({
+            id: rosterAssignments.id,
+            participantId: rosterAssignments.participantId,
+            assignmentDate: rosterAssignments.assignmentDate,
+          })
+      : []
+    const assignmentIdByParticipantDate = new Map(
+      copiedAssignments.map((row) => [
+        `${row.participantId}/${row.assignmentDate}`,
+        row.id,
+      ]),
+    )
+    if (sourceSegments.length > 0) {
+      const sourceAssignmentById = new Map(
+        sourceAssignments.map((row) => [row.id, row]),
+      )
+      await tx
+        .insert(rosterAssignmentSegments)
+        .values(
+          sourceSegments.map((segment) => {
+            const sourceAssignment = sourceAssignmentById.get(
+              segment.assignmentId,
+            )!
+            const sourceParticipant = sourceParticipantById.get(
+              sourceAssignment.participantId,
+            )!
+            const participantId = participantIdByNumber.get(
+              sourceParticipant.employeeNumber,
+            )!
+            return {
+              assignmentId: assignmentIdByParticipantDate.get(
+                `${participantId}/${sourceAssignment.assignmentDate}`,
+              )!,
+              sortOrder: segment.sortOrder,
+              startTime: segment.startTime,
+              endTime: segment.endTime,
+              endsNextDay: segment.endsNextDay,
+            }
+          }),
+        )
+        .returning()
+    }
+
+    const participantIdByOldId = new Map(
+      sourceParticipants.map((participant) => [
+        participant.id,
+        participantIdByNumber.get(participant.employeeNumber)!,
+      ]),
+    )
+    const copiedWarnings = sourceViolations.filter(
+      (violation) =>
+        violation.severity === 'soft' && violation.resolution === 'overridden',
+    )
+    if (copiedWarnings.length > 0) {
+      await tx
+        .insert(rosterViolations)
+        .values(
+          copiedWarnings.map((violation) => ({
+            cycleId: cycle.id,
+            ruleCode: violation.ruleCode,
+            severity: violation.severity,
+            resolution: 'open' as const,
+            message: violation.message,
+            participantId: violation.participantId
+              ? participantIdByOldId.get(violation.participantId)
+              : null,
+            propertyId: violation.propertyId,
+            violationDate: violation.violationDate,
+            evidence: violation.evidence,
+          })),
+        )
+        .returning()
+    }
+
+    await tx
+      .insert(rosterEvents)
+      .values({
+        cycleId: cycle.id,
+        actorId: args.actorId,
+        cycleVersion: 1,
+        eventType: 'revision_created',
+        context: {
+          sourceCycleId: source.id,
+          sourceRevision: source.revision,
+          copiedAssignmentCount: sourceAssignments.length,
+          reopenedWarningCount: copiedWarnings.length,
+        },
+      })
+      .returning()
+
+    return { cycleId: cycle.id, revision: cycle.revision, version: cycle.version }
   })
 }

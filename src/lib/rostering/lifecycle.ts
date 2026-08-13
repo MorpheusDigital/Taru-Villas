@@ -197,3 +197,31 @@ export function validatePublicationReadiness(
   }
   return { ok: true }
 }
+
+export function validateRevisionCreation(
+  sourceStatus: 'draft' | 'submitted' | 'published' | 'superseded',
+  actualVersion: number,
+  expectedVersion: number,
+  sourceRevision: number,
+  latestRevision: number,
+): LifecycleValidation {
+  if (sourceStatus !== 'published') {
+    return invalid(
+      'SOURCE_NOT_PUBLISHED',
+      'A correction revision can only be created from the current published roster.',
+    )
+  }
+  if (actualVersion !== expectedVersion) {
+    return invalid(
+      'VERSION_CONFLICT',
+      'This roster changed after it was opened. Refresh and try again.',
+    )
+  }
+  if (sourceRevision !== latestRevision) {
+    return invalid(
+      'NEWER_REVISION_EXISTS',
+      'A newer revision already exists for this hub and month.',
+    )
+  }
+  return { ok: true }
+}

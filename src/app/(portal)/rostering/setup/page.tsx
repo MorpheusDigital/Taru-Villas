@@ -2,10 +2,14 @@ import { redirect } from 'next/navigation'
 
 import { ForecastGrid } from '@/components/rostering/forecast-grid'
 import { ImportPanel } from '@/components/rostering/import-panel'
+import { ProfileLinkManager } from '@/components/rostering/profile-link-manager'
 import { UnavailabilityManager } from '@/components/rostering/unavailability-manager'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { requireAuth } from '@/lib/auth/guards'
-import { getRosteringSetupDirectory } from '@/lib/db/queries/rostering-imports'
+import {
+  getRosterProfileLinkDirectory,
+  getRosteringSetupDirectory,
+} from '@/lib/db/queries/rostering-imports'
 import { getRosteringAccess } from '@/lib/rostering/access'
 
 export const dynamic = 'force-dynamic'
@@ -25,10 +29,12 @@ export default async function RosteringSetupPage() {
   if (!profile.isActive || profile.role === 'staff') redirect('/surveys')
 
   const access = await getRosteringAccess(profile.id, profile.role, profile.orgId)
-  const directory = await getRosteringSetupDirectory(
-    profile.orgId,
-    access.propertyIds,
-  )
+  const [directory, linkDirectory] = await Promise.all([
+    getRosteringSetupDirectory(profile.orgId, access.propertyIds),
+    access.isAdmin
+      ? getRosterProfileLinkDirectory(profile.orgId)
+      : Promise.resolve(null),
+  ])
 
   return (
     <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-6 p-4 sm:p-6 lg:p-8">
@@ -51,6 +57,9 @@ export default async function RosteringSetupPage() {
           <TabsTrigger value="imports">CSV imports</TabsTrigger>
           <TabsTrigger value="forecasts">Occupancy forecast</TabsTrigger>
           <TabsTrigger value="unavailability">Approved unavailability</TabsTrigger>
+          {access.isAdmin && (
+            <TabsTrigger value="profile-links">Staff account links</TabsTrigger>
+          )}
         </TabsList>
         <TabsContent value="imports">
           <ImportPanel
@@ -72,6 +81,14 @@ export default async function RosteringSetupPage() {
             initialRecords={directory.unavailability}
           />
         </TabsContent>
+        {linkDirectory && (
+          <TabsContent value="profile-links">
+            <ProfileLinkManager
+              employees={linkDirectory.employees}
+              profiles={linkDirectory.profiles}
+            />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )

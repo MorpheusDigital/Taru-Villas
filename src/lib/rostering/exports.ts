@@ -9,6 +9,11 @@ export interface PersonalRosterExportRow {
   explanation: string
 }
 
+export interface ManagementRosterExportRow extends PersonalRosterExportRow {
+  employeeNumber: string
+  employeeName: string
+}
+
 function spreadsheetSafe(value: string): string {
   return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value
 }
@@ -35,6 +40,40 @@ export function buildPersonalRosterCsv(
   ]
   const body = rows.map((row) =>
     [
+      row.date,
+      row.dutyCode,
+      row.propertyName,
+      row.roleName,
+      row.shiftCode,
+      row.shiftTimes,
+      row.workingMinutes,
+      row.explanation,
+    ]
+      .map(csvCell)
+      .join(','),
+  )
+  return `${[header.join(','), ...body].join('\n')}\n`
+}
+
+export function buildManagementRosterCsv(
+  rows: ManagementRosterExportRow[],
+): string {
+  const header = [
+    'employee_number',
+    'employee_name',
+    'date',
+    'duty_code',
+    'property',
+    'role',
+    'shift',
+    'shift_times',
+    'working_minutes',
+    'explanation',
+  ]
+  const body = rows.map((row) =>
+    [
+      row.employeeNumber,
+      row.employeeName,
       row.date,
       row.dutyCode,
       row.propertyName,

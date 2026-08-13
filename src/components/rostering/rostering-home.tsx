@@ -240,9 +240,11 @@ export function RosteringHome({
               violations are cleared and soft warnings are resolved.
             </p>
             {isAdmin && (
-              <Badge variant="outline" className="border-teal-600/30 bg-background text-teal-800 dark:text-teal-200">
-                Admin approval access
-              </Badge>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/rostering/approvals">
+                  <ShieldCheck /> Open approval queue
+                </Link>
+              </Button>
             )}
           </CardContent>
         </Card>

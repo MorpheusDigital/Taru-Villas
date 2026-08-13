@@ -4,6 +4,7 @@ import {
   validateAssignmentEdit,
   validateLifecycleVersion,
   validatePublicationReadiness,
+  validateRevisionCreation,
 } from './lifecycle'
 
 const context = {
@@ -138,5 +139,20 @@ describe('rostering lifecycle validation', () => {
         policyStatus: 'active',
       }),
     ).toEqual(expect.objectContaining({ ok: false, code: 'OPEN_SOFT_WARNINGS' }))
+  })
+
+  it('creates revisions only from the current published version', () => {
+    expect(validateRevisionCreation('published', 6, 6, 3, 3)).toEqual({
+      ok: true,
+    })
+    expect(validateRevisionCreation('draft', 6, 6, 3, 3)).toEqual(
+      expect.objectContaining({ ok: false, code: 'SOURCE_NOT_PUBLISHED' }),
+    )
+    expect(validateRevisionCreation('published', 6, 5, 3, 3)).toEqual(
+      expect.objectContaining({ ok: false, code: 'VERSION_CONFLICT' }),
+    )
+    expect(validateRevisionCreation('published', 6, 6, 3, 4)).toEqual(
+      expect.objectContaining({ ok: false, code: 'NEWER_REVISION_EXISTS' }),
+    )
   })
 })
