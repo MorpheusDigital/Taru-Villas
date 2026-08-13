@@ -1,6 +1,6 @@
 # TaruShift Preview Runbook
 
-This runbook prepares the Phase 1 TaruShift foundation and opens a generated, read-only roster draft. It does not submit, approve, or publish a roster.
+This runbook prepares and exercises the Phase 1 TaruShift workflow from source data through staff publication.
 
 ## Prerequisites
 
@@ -47,11 +47,39 @@ Do not apply the demo seed to an environment where either property already belon
 
 5. Choose **Regenerate draft**, accept the replacement warning, and confirm the resulting assignments and violations remain deterministic for unchanged input. The cycle version increments while the draft revision remains the same.
 
+## Import and maintain source data
+
+1. Open `/rostering/setup`. Each CSV contract provides a downloadable template and server-side preview before commit.
+2. Admins may commit Employees and Boundary context. Admins and appropriately scoped property managers may commit Forecasts and Approved unavailability.
+3. Forecasts and approved unavailability can also be entered from the calendar forms. Phase 1 treats these records as already approved and does not implement leave requests or balances.
+4. Any source change affecting an existing draft creates a hard `SOURCE_DATA_CHANGED` blocker. Regenerate that draft before submission.
+5. Employee import never creates or automatically links Portal accounts. Admins use **Staff account links** to explicitly connect one existing Portal profile to one employee.
+
+## Edit, submit, and publish
+
+1. In a draft, select a working cell and choose **Edit assignment**. The server rechecks hub scope, role qualification, approved unavailability, commuter cutoff/split-shift rules, and weekly minutes including prior-month boundary time.
+2. Clear hard violations. An admin may override a soft warning only with a required reason; the resolver, time, and reason remain in the event history.
+3. A property manager or admin submits each property roster. Open hard violations or unresolved soft warnings affecting that property block submission.
+4. When every child roster is submitted, the hub cycle moves to the admin queue at `/rostering/approvals`.
+5. An admin may return the cycle to draft with review comments or publish it atomically. Publication supersedes the former active revision and sends an in-app notification to linked staff.
+6. To correct a published roster, choose **Create correction revision**. TaruShift copies the frozen participants and assignments into revision `n + 1`; the published source revision remains intact. Previously overridden warnings reopen and require a fresh decision.
+
+## Staff view and outputs
+
+- Linked users open `/my-roster`. Only their most recent published assignment set is returned; drafts and other employees are never queried.
+- **Download CSV** on My Roster exports only that linked employee. Management **Export CSV** is tenant-checked and property-scoped for property managers.
+- Management **Print** opens an A3 landscape matrix with cycle identity, revision/status, legend, and generated timestamp.
+
+## Rollback and recovery
+
+- Do not edit published assignment rows. Create a correction revision, make the correction, submit, and publish it.
+- A draft can be regenerated from current source data; this replaces only that draft's generated snapshot and assignments and increments its optimistic version.
+- A submitted cycle can be returned to draft only by an admin with audit comments.
+- If a migration rollback is required, take a database backup first and use the environment's normal migration procedure. The explicit Phase 1 schema migration is `drizzle/0028_tarushift_foundation.sql`.
+
 ## Phase 1 boundaries
 
-- The preview is read-only. There are no assignment edit, override, submit, reject, approve, or publish actions.
-- CSV import contracts and management screens are not included yet; this seed supplies preview data directly.
-- Published cycles are not mutated by the generation service. Revision creation belongs to the lifecycle implementation.
-- Staff-linked employee self-view, print/PDF styling, and CSV export are not included yet.
 - OPERA and MiHCM are future input writers; the foundation accepts their source values but does not integrate with either service.
+- Cross-hub staff exchange is not automated. Same-hub spoke duty is supported.
+- PDF files are not generated server-side; the print view is designed for browser print/PDF output.
 - The demo policy is marked for preview and is not legal advice. Production policy activation requires the approved HR/legal process described in the TaruShift specification.

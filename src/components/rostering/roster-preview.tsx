@@ -9,6 +9,7 @@ import {
   CalendarRange,
   CheckCircle2,
   Download,
+  History,
   Loader2,
   Printer,
   RefreshCw,
@@ -22,7 +23,7 @@ import { RosterMatrix } from '@/components/rostering/roster-matrix'
 import { RosterWorkflowControls } from '@/components/rostering/roster-workflow-controls'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Select,
   SelectContent,
@@ -301,6 +302,36 @@ export function RosterPreview({
         isAdmin={isAdmin}
         accessiblePropertyIds={accessiblePropertyIds}
       />
+
+      <Card className="gap-0 overflow-hidden py-0">
+        <CardHeader className="border-b px-5 py-4">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <History className="size-4" /> Audit history
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="divide-y px-0 py-0">
+          {preview.events.map((event) => (
+            <details key={event.id} className="group px-5 py-3">
+              <summary className="cursor-pointer list-none text-sm">
+                <span className="font-medium">
+                  {event.eventType.replaceAll('_', ' ')}
+                </span>
+                <span className="ml-2 text-xs text-muted-foreground">
+                  v{event.cycleVersion} · {event.createdAt.toLocaleString('en-GB', {
+                    timeZone: 'Asia/Colombo',
+                  })}
+                </span>
+              </summary>
+              <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-[180px_1fr]">
+                <p>Actor: {event.actorId ?? 'System'}</p>
+                <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-muted p-3 font-mono text-[11px] text-foreground">
+                  {JSON.stringify(event.context, null, 2)}
+                </pre>
+              </div>
+            </details>
+          ))}
+        </CardContent>
+      </Card>
 
       <div className="flex gap-2 overflow-x-auto pb-1">
         <button

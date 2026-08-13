@@ -8,6 +8,7 @@ import {
   rosterAssignments,
   rosterAssignmentSegments,
   rosterCycles,
+  rosterEvents,
   rosterHubs,
   rosterInputSnapshots,
   rosterParticipants,
@@ -109,7 +110,7 @@ export async function getCyclePreview(orgId: string, cycleId: string) {
     .limit(1)
   if (!cycle) return null
 
-  const [children, participants, assignments, violations, snapshots] =
+  const [children, participants, assignments, violations, snapshots, events] =
     await Promise.all([
       db
         .select({
@@ -150,6 +151,11 @@ export async function getCyclePreview(orgId: string, cycleId: string) {
         .from(rosterInputSnapshots)
         .where(eq(rosterInputSnapshots.cycleId, cycleId))
         .limit(1),
+      db
+        .select()
+        .from(rosterEvents)
+        .where(eq(rosterEvents.cycleId, cycleId))
+        .orderBy(desc(rosterEvents.createdAt)),
     ])
 
   const assignmentIds = assignments.map((row) => row.id)
@@ -188,6 +194,7 @@ export async function getCyclePreview(orgId: string, cycleId: string) {
       ),
     })),
     violations,
+    events,
     inputChecksum: snapshot?.checksum ?? null,
     demandCoverage,
     editOptions: input
