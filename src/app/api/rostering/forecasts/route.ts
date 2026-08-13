@@ -1,8 +1,11 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod/v4'
 
 import { getProfile } from '@/lib/auth/guards'
-import { upsertManualForecasts } from '@/lib/db/queries/rostering-imports'
+import {
+  listForecastsForMonth,
+  upsertManualForecasts,
+} from '@/lib/db/queries/rostering-imports'
 import { getRosteringAccess } from '@/lib/rostering/access'
 
 const forecastSchema = z.object({
@@ -15,6 +18,41 @@ const forecastSchema = z.object({
 const bodySchema = z.object({
   forecasts: z.array(forecastSchema).min(1).max(1_000),
 })
+
+export async function GET(request: NextRequest) {
+  try {
+    const profile = await getProfile()
+    if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!profile.isActive || !['admin', 'property_manager'].includes(profile.role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    const query = z
+      .object({
+        propertyId: z.string().uuid(),
+        month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+      })
+      .safeParse({
+        propertyId: request.nextUrl.searchParams.get('propertyId'),
+        month: request.nextUrl.searchParams.get('month'),
+      })
+    if (!query.success) {
+      return NextResponse.json({ error: 'Invalid property or month' }, { status: 400 })
+    }
+    const access = await getRosteringAccess(profile.id, profile.role, profile.orgId)
+    const forecasts = await listForecastsForMonth({
+      orgId: profile.orgId,
+      accessiblePropertyIds: access.propertyIds,
+      ...query.data,
+    })
+    if (!forecasts) {
+      return NextResponse.json({ error: 'Property not found' }, { status: 404 })
+    }
+    return NextResponse.json({ forecasts })
+  } catch (error) {
+    console.error('GET /api/rostering/forecasts error:', error)
+    return NextResponse.json({ error: 'Failed to fetch forecasts' }, { status: 500 })
+  }
+}
 
 export async function POST(request: Request) {
   try {

@@ -13,6 +13,7 @@ import {
   MapPinned,
   ShieldCheck,
   Sparkles,
+  Database,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -157,6 +158,9 @@ export function RosteringHome({
             Generate one coordinated draft for every property in a hub. Hard
             rules stay visible; optimization warnings remain explainable.
           </p>
+          <Button asChild variant="outline" className="mt-5 border-white/25 bg-white/10 text-white hover:bg-white/20 hover:text-white">
+            <Link href="/rostering/setup"><Database /> Manage source data</Link>
+          </Button>
         </div>
       </section>
 

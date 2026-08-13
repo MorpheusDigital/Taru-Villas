@@ -42,6 +42,7 @@ const segmentLabels: Record<string, string> = {
   distances: 'Distances',
   rostering: 'Rostering',
   approvals: 'Approvals',
+  setup: 'Setup',
 }
 
 function getPageTitle(pathname: string): string {

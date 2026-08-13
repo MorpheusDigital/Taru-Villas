@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
 
 import {
   canCommitRosterImport,
@@ -747,4 +747,119 @@ export async function saveManualUnavailability(args: {
     )
     return saved
   })
+}
+
+export async function getRosteringSetupDirectory(
+  orgId: string,
+  accessiblePropertyIds: string[] | null,
+) {
+  if (accessiblePropertyIds?.length === 0) {
+    return { properties: [], employees: [], unavailability: [] }
+  }
+  const propertyRows = await db
+    .select({ id: properties.id, name: properties.name, code: properties.code })
+    .from(properties)
+    .where(
+      accessiblePropertyIds === null
+        ? and(eq(properties.orgId, orgId), eq(properties.isActive, true))
+        : and(
+            eq(properties.orgId, orgId),
+            eq(properties.isActive, true),
+            inArray(properties.id, accessiblePropertyIds),
+          ),
+    )
+    .orderBy(asc(properties.name))
+  const propertyIds = propertyRows.map((property) => property.id)
+  const employeeRows = propertyIds.length
+    ? await db
+        .select({
+          id: rosterEmployees.id,
+          employeeNumber: rosterEmployees.employeeNumber,
+          fullName: rosterEmployees.fullName,
+          basePropertyId: rosterEmployees.basePropertyId,
+          roleCode: rosterRoles.code,
+        })
+        .from(rosterEmployees)
+        .innerJoin(rosterRoles, eq(rosterRoles.id, rosterEmployees.roleId))
+        .where(
+          and(
+            eq(rosterEmployees.orgId, orgId),
+            eq(rosterEmployees.isActive, true),
+            inArray(rosterEmployees.basePropertyId, propertyIds),
+          ),
+        )
+        .orderBy(asc(rosterEmployees.employeeNumber))
+    : []
+  const unavailabilityRows = employeeRows.length
+    ? await db
+        .select({
+          id: rosterUnavailability.id,
+          employeeId: rosterUnavailability.employeeId,
+          startDate: rosterUnavailability.startDate,
+          endDate: rosterUnavailability.endDate,
+          type: rosterUnavailability.type,
+          reference: rosterUnavailability.externalReference,
+          note: rosterUnavailability.operationalNote,
+          source: rosterUnavailability.source,
+          createdAt: rosterUnavailability.createdAt,
+        })
+        .from(rosterUnavailability)
+        .where(
+          inArray(
+            rosterUnavailability.employeeId,
+            employeeRows.map((employee) => employee.id),
+          ),
+        )
+        .orderBy(desc(rosterUnavailability.startDate))
+        .limit(100)
+    : []
+
+  return {
+    properties: propertyRows,
+    employees: employeeRows,
+    unavailability: unavailabilityRows,
+  }
+}
+
+export async function listForecastsForMonth(args: {
+  orgId: string
+  propertyId: string
+  month: string
+  accessiblePropertyIds: string[] | null
+}) {
+  const [property] = await db
+    .select({ id: properties.id })
+    .from(properties)
+    .where(
+      and(
+        eq(properties.id, args.propertyId),
+        eq(properties.orgId, args.orgId),
+        eq(properties.isActive, true),
+      ),
+    )
+    .limit(1)
+  if (
+    !property ||
+    (args.accessiblePropertyIds !== null &&
+      !args.accessiblePropertyIds.includes(args.propertyId))
+  ) {
+    return null
+  }
+  const start = `${args.month}-01`
+  const endDate = new Date(`${start}T00:00:00.000Z`)
+  endDate.setUTCMonth(endDate.getUTCMonth() + 1)
+  endDate.setUTCDate(0)
+  const end = endDate.toISOString().slice(0, 10)
+
+  return db
+    .select()
+    .from(rosterForecasts)
+    .where(
+      and(
+        eq(rosterForecasts.propertyId, args.propertyId),
+        gte(rosterForecasts.forecastDate, start),
+        lte(rosterForecasts.forecastDate, end),
+      ),
+    )
+    .orderBy(asc(rosterForecasts.forecastDate))
 }
