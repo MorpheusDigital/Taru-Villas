@@ -20,15 +20,16 @@ function preferredTemplateCodes(
   activeRank: number,
   activeCount: number,
 ): string[] {
-  if (role.code === 'BRIDGE_COMMIS') return ['BRIDGE_COMMIS']
-  if (role.code === 'NIGHT_AUDITOR') return ['NIGHT_AUDITOR']
-  if (role.code === 'GSA') {
+  const roleCode = role.code.replace(/^DEMO_/, '')
+  if (roleCode === 'BRIDGE_COMMIS') return ['BRIDGE_COMMIS']
+  if (roleCode === 'NIGHT_AUDITOR') return ['NIGHT_AUDITOR']
+  if (roleCode === 'GSA') {
     return [activeRank % 2 === 0 ? 'GSA_MORNING' : 'GSA_EVENING']
   }
   if (role.isPropertyManager && activeCount === 1) return ['SOLO_PIC']
   if (property.safariFocus) return ['SAFARI_EARLY', 'DEFAULT']
 
-  if (['WAITER', 'HOUSEKEEPER'].includes(role.code)) {
+  if (['WAITER', 'HOUSEKEEPER'].includes(roleCode)) {
     if (activeCount === 1) return ['ACTIVE_1_SPLIT']
     if (activeCount === 2) {
       return [activeRank === 0 ? 'ACTIVE_2_MORNING' : 'ACTIVE_2_CLOSE']
@@ -48,8 +49,9 @@ function isEligibleForTemplate(
   template: EngineShiftTemplate,
 ): boolean {
   const isSplit = template.segments.length > 1
+  const roleCode = role.code.replace(/^DEMO_/, '')
 
-  if (property.multiZoneSeparation && role.code === 'WAITER' && isSplit) {
+  if (property.multiZoneSeparation && roleCode === 'WAITER' && isSplit) {
     return false
   }
 
@@ -65,7 +67,7 @@ function isEligibleForTemplate(
   }
 
   if (
-    role.code !== 'NIGHT_AUDITOR' &&
+    roleCode !== 'NIGHT_AUDITOR' &&
     template.segments.some(
       (segment) =>
         segment.endsNextDay || segment.endTime > property.barCloseTime,

@@ -123,4 +123,25 @@ describe('selectShiftTemplate', () => {
 
     expect(selected?.code).toBe('BRIDGE_COMMIS')
   })
+
+  it('applies operational locks to namespaced demo role codes', () => {
+    const demoRole = { ...role, id: 'demo-gsa', code: 'DEMO_GSA' }
+    const selected = selectShiftTemplate({
+      employee: {
+        ...resident,
+        roleId: demoRole.id,
+        skillRoleIds: [demoRole.id],
+      },
+      role: demoRole,
+      property,
+      activeRank: 1,
+      activeCount: 2,
+      templates: [
+        { ...template('GSA_MORNING', '07:00', '16:00'), roleId: demoRole.id },
+        { ...template('GSA_EVENING', '14:00', '23:00'), roleId: demoRole.id },
+      ],
+    })
+
+    expect(selected?.code).toBe('GSA_EVENING')
+  })
 })
