@@ -19,6 +19,7 @@ import {
   UserCheck,
   Package,
   CalendarClock,
+  CalendarDays,
 } from 'lucide-react'
 
 import { useAuth } from '@/components/providers/auth-provider'
@@ -65,6 +66,7 @@ const mainNavItems: NavItem[] = [
   { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { title: 'Surveys', href: '/surveys', icon: ClipboardCheck },
   { title: 'Task Manager', href: '/tasks', icon: ListTodo },
+  { title: 'My Roster', href: '/my-roster', icon: CalendarDays },
   { title: 'Rostering', href: '/rostering', icon: CalendarClock },
   { title: 'SOPs', href: '/sops', icon: ListChecks },
   { title: 'Daily Records', href: '/daily-records', icon: ClipboardList },
