@@ -12,6 +12,7 @@ import {
   date,
   time,
   unique,
+  index,
   jsonb,
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
@@ -1735,3 +1736,615 @@ export type FleetTripReport = typeof fleetTripReports.$inferSelect
 export type NewFleetTripReport = typeof fleetTripReports.$inferInsert
 export type PushSubscription = typeof pushSubscriptions.$inferSelect
 export type Notification = typeof notifications.$inferSelect
+
+// ---------------------------------------------------------------------------
+// TaruShift rostering
+// ---------------------------------------------------------------------------
+export const rosterHubPropertyKindEnum = pgEnum('roster_hub_property_kind', [
+  'hub',
+  'spoke',
+])
+export const rosterLaborTierEnum = pgEnum('roster_labor_tier', [
+  'fixed',
+  'variable',
+])
+export const rosterResidencyTypeEnum = pgEnum('roster_residency_type', [
+  'resident',
+  'commuter',
+])
+export const rosterPolicyStatusEnum = pgEnum('roster_policy_status', [
+  'draft',
+  'awaiting_hr_approval',
+  'approved',
+  'active',
+  'retired',
+])
+export const rosterInputSourceEnum = pgEnum('roster_input_source', [
+  'manual',
+  'csv',
+  'opera',
+  'mihcm',
+])
+export const rosterCycleStatusEnum = pgEnum('roster_cycle_status', [
+  'draft',
+  'submitted',
+  'published',
+  'superseded',
+])
+export const rosterChildStatusEnum = pgEnum('roster_child_status', [
+  'draft',
+  'submitted',
+])
+export const rosterViolationSeverityEnum = pgEnum(
+  'roster_violation_severity',
+  ['hard', 'soft'],
+)
+export const rosterViolationResolutionEnum = pgEnum(
+  'roster_violation_resolution',
+  ['open', 'overridden', 'resolved_by_edit'],
+)
+export const rosterAssignmentSourceEnum = pgEnum('roster_assignment_source', [
+  'generated',
+  'manual',
+])
+export const rosterRestCategoryEnum = pgEnum('roster_rest_category', [
+  'none',
+  'full',
+  'half',
+])
+
+export const rosterHubs = pgTable(
+  'roster_hubs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: uuid('org_id').notNull().references(() => organizations.id),
+    name: text('name').notNull(),
+    code: varchar('code', { length: 50 }).notNull(),
+    isActive: boolean('is_active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [unique('roster_hubs_org_code_unique').on(table.orgId, table.code)],
+)
+
+export const rosterHubProperties = pgTable(
+  'roster_hub_properties',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    hubId: uuid('hub_id').notNull().references(() => rosterHubs.id, { onDelete: 'cascade' }),
+    propertyId: uuid('property_id').notNull().references(() => properties.id, { onDelete: 'cascade' }),
+    kind: rosterHubPropertyKindEnum('kind').notNull(),
+    isActive: boolean('is_active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('roster_hub_properties_property_unique').on(table.propertyId),
+    unique('roster_hub_properties_hub_property_unique').on(table.hubId, table.propertyId),
+    index('roster_hub_properties_hub_active_idx').on(table.hubId, table.isActive),
+  ],
+)
+
+export const rosterDepartments = pgTable(
+  'roster_departments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: uuid('org_id').notNull().references(() => organizations.id),
+    name: text('name').notNull(),
+    code: varchar('code', { length: 50 }).notNull(),
+    sortOrder: integer('sort_order').default(0).notNull(),
+    isActive: boolean('is_active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [unique('roster_departments_org_code_unique').on(table.orgId, table.code)],
+)
+
+export const rosterRoles = pgTable(
+  'roster_roles',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: uuid('org_id').notNull().references(() => organizations.id),
+    departmentId: uuid('department_id').notNull().references(() => rosterDepartments.id, { onDelete: 'restrict' }),
+    name: text('name').notNull(),
+    code: varchar('code', { length: 80 }).notNull(),
+    laborTier: rosterLaborTierEnum('labor_tier').notNull(),
+    sameHubReliefEligible: boolean('same_hub_relief_eligible').default(false).notNull(),
+    isAreaManager: boolean('is_area_manager').default(false).notNull(),
+    isPropertyManager: boolean('is_property_manager').default(false).notNull(),
+    isMinimumFloorRole: boolean('is_minimum_floor_role').default(false).notNull(),
+    minimumFloor: integer('minimum_floor').default(0).notNull(),
+    isActive: boolean('is_active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [unique('roster_roles_org_code_unique').on(table.orgId, table.code)],
+)
+
+export const rosterEmployees = pgTable(
+  'roster_employees',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: uuid('org_id').notNull().references(() => organizations.id),
+    employeeNumber: varchar('employee_number', { length: 80 }).notNull(),
+    fullName: text('full_name').notNull(),
+    roleId: uuid('role_id').notNull().references(() => rosterRoles.id, { onDelete: 'restrict' }),
+    basePropertyId: uuid('base_property_id').notNull().references(() => properties.id, { onDelete: 'restrict' }),
+    profileId: uuid('profile_id').unique().references(() => profiles.id, { onDelete: 'set null' }),
+    residencyType: rosterResidencyTypeEnum('residency_type').notNull(),
+    homeDistanceKm: numeric('home_distance_km', { precision: 7, scale: 2 }).default('0').notNull(),
+    employmentStartDate: date('employment_start_date').notNull(),
+    employmentEndDate: date('employment_end_date'),
+    isActive: boolean('is_active').default(true).notNull(),
+    isDemo: boolean('is_demo').default(false).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('roster_employees_org_number_unique').on(table.orgId, table.employeeNumber),
+    index('roster_employees_org_property_active_idx').on(table.orgId, table.basePropertyId, table.isActive),
+  ],
+)
+
+export const rosterEmployeeSkills = pgTable(
+  'roster_employee_skills',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    employeeId: uuid('employee_id').notNull().references(() => rosterEmployees.id, { onDelete: 'cascade' }),
+    roleId: uuid('role_id').notNull().references(() => rosterRoles.id, { onDelete: 'restrict' }),
+    isPrimary: boolean('is_primary').default(false).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [unique('roster_employee_skills_employee_role_unique').on(table.employeeId, table.roleId)],
+)
+
+export const rosterPropertySettings = pgTable('roster_property_settings', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  propertyId: uuid('property_id').notNull().unique().references(() => properties.id, { onDelete: 'cascade' }),
+  barCloseTime: time('bar_close_time').notNull(),
+  transportCutoff: time('transport_cutoff').notNull(),
+  multiZoneSeparation: boolean('multi_zone_separation').default(false).notNull(),
+  safariFocus: boolean('safari_focus').default(false).notNull(),
+  outsourcedSecurity: boolean('outsourced_security').default(false).notNull(),
+  timeZone: varchar('time_zone', { length: 64 }).default('Asia/Colombo').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const rosterCadreRequirements = pgTable(
+  'roster_cadre_requirements',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    propertyId: uuid('property_id').notNull().references(() => properties.id, { onDelete: 'cascade' }),
+    roleId: uuid('role_id').notNull().references(() => rosterRoles.id, { onDelete: 'cascade' }),
+    requiredDailyActive: integer('required_daily_active').notNull(),
+    reliefMultiplier: numeric('relief_multiplier', { precision: 5, scale: 2 }).default('1.50').notNull(),
+    effectiveFrom: date('effective_from').notNull(),
+    effectiveTo: date('effective_to'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('roster_cadre_property_role_from_unique').on(table.propertyId, table.roleId, table.effectiveFrom),
+    index('roster_cadre_property_role_dates_idx').on(table.propertyId, table.roleId, table.effectiveFrom, table.effectiveTo),
+  ],
+)
+
+export const rosterStaffingBands = pgTable(
+  'roster_staffing_bands',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    propertyId: uuid('property_id').notNull().references(() => properties.id, { onDelete: 'cascade' }),
+    roleId: uuid('role_id').notNull().references(() => rosterRoles.id, { onDelete: 'cascade' }),
+    occupancyMin: numeric('occupancy_min', { precision: 5, scale: 2 }).notNull(),
+    occupancyMax: numeric('occupancy_max', { precision: 5, scale: 2 }).notNull(),
+    requiredActive: integer('required_active').notNull(),
+    effectiveFrom: date('effective_from').notNull(),
+    effectiveTo: date('effective_to'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('roster_bands_property_role_range_from_unique').on(
+      table.propertyId,
+      table.roleId,
+      table.occupancyMin,
+      table.occupancyMax,
+      table.effectiveFrom,
+    ),
+    index('roster_bands_property_role_dates_idx').on(table.propertyId, table.roleId, table.effectiveFrom, table.effectiveTo),
+  ],
+)
+
+export const rosterPolicyVersions = pgTable(
+  'roster_policy_versions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: uuid('org_id').notNull().references(() => organizations.id),
+    name: text('name').notNull(),
+    version: integer('version').notNull(),
+    status: rosterPolicyStatusEnum('status').default('draft').notNull(),
+    effectiveFrom: date('effective_from').notNull(),
+    effectiveTo: date('effective_to'),
+    approvedByName: text('approved_by_name'),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    evidenceReference: text('evidence_reference'),
+    createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+    activatedBy: uuid('activated_by').references(() => profiles.id, { onDelete: 'set null' }),
+    activatedAt: timestamp('activated_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [unique('roster_policy_versions_org_name_version_unique').on(table.orgId, table.name, table.version)],
+)
+
+export const rosterPolicyRules = pgTable(
+  'roster_policy_rules',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    policyVersionId: uuid('policy_version_id').notNull().references(() => rosterPolicyVersions.id, { onDelete: 'cascade' }),
+    ruleCode: varchar('rule_code', { length: 100 }).notNull(),
+    calculationType: varchar('calculation_type', { length: 80 }).notNull(),
+    severity: rosterViolationSeverityEnum('severity').notNull(),
+    maxWorkingMinutesPerDay: integer('max_working_minutes_per_day'),
+    maxWorkingMinutesPerWeek: integer('max_working_minutes_per_week'),
+    workWeekStartsOn: integer('work_week_starts_on'),
+    monthlyWorkdayTarget: integer('monthly_workday_target'),
+    fullRestDaysPerWeek: integer('full_rest_days_per_week'),
+    halfRestDaysPerWeek: integer('half_rest_days_per_week'),
+    breakThresholdMinutes: integer('break_threshold_minutes'),
+    breakMinutes: integer('break_minutes'),
+    minimumSplitGapMinutes: integer('minimum_split_gap_minutes'),
+    maximumSpreadoverMinutes: integer('maximum_spreadover_minutes'),
+    commuterStraightShiftRequired: boolean('commuter_straight_shift_required'),
+    enforceTransportCutoff: boolean('enforce_transport_cutoff'),
+    travelDistanceThresholdKm: numeric('travel_distance_threshold_km', { precision: 7, scale: 2 }),
+    residentTargetPercent: numeric('resident_target_percent', { precision: 5, scale: 2 }),
+    commuterTargetPercent: numeric('commuter_target_percent', { precision: 5, scale: 2 }),
+    areaManagerSpokeDays: integer('area_manager_spoke_days'),
+    areaManagerOverlapDays: integer('area_manager_overlap_days'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [unique('roster_policy_rules_version_code_unique').on(table.policyVersionId, table.ruleCode)],
+)
+
+export const rosterShiftTemplates = pgTable(
+  'roster_shift_templates',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    policyVersionId: uuid('policy_version_id').notNull().references(() => rosterPolicyVersions.id, { onDelete: 'cascade' }),
+    roleId: uuid('role_id').notNull().references(() => rosterRoles.id, { onDelete: 'cascade' }),
+    code: varchar('code', { length: 100 }).notNull(),
+    label: text('label').notNull(),
+    applicabilityCode: varchar('applicability_code', { length: 100 }).notNull(),
+    dutyCode: varchar('duty_code', { length: 20 }).default('W').notNull(),
+    scheduledMinutes: integer('scheduled_minutes').notNull(),
+    breakMinutes: integer('break_minutes').notNull(),
+    workingMinutes: integer('working_minutes').notNull(),
+    isPublished: boolean('is_published').default(false).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [unique('roster_shift_templates_policy_role_code_unique').on(table.policyVersionId, table.roleId, table.code)],
+)
+
+export const rosterShiftTemplateSegments = pgTable(
+  'roster_shift_template_segments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    shiftTemplateId: uuid('shift_template_id').notNull().references(() => rosterShiftTemplates.id, { onDelete: 'cascade' }),
+    sortOrder: integer('sort_order').notNull(),
+    startTime: time('start_time').notNull(),
+    endTime: time('end_time').notNull(),
+    endsNextDay: boolean('ends_next_day').default(false).notNull(),
+  },
+  (table) => [unique('roster_shift_segments_template_order_unique').on(table.shiftTemplateId, table.sortOrder)],
+)
+
+export const rosterImportBatches = pgTable(
+  'roster_import_batches',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: uuid('org_id').notNull().references(() => organizations.id),
+    importType: varchar('import_type', { length: 50 }).notNull(),
+    sourceFileName: text('source_file_name').notNull(),
+    fileChecksum: varchar('file_checksum', { length: 128 }).notNull(),
+    status: varchar('status', { length: 30 }).default('preview').notNull(),
+    totalCount: integer('total_count').default(0).notNull(),
+    addCount: integer('add_count').default(0).notNull(),
+    updateCount: integer('update_count').default(0).notNull(),
+    unchangedCount: integer('unchanged_count').default(0).notNull(),
+    errorCount: integer('error_count').default(0).notNull(),
+    previewSummary: jsonb('preview_summary').default(sql`'{}'::jsonb`).notNull(),
+    committedBy: uuid('committed_by').references(() => profiles.id, { onDelete: 'set null' }),
+    committedAt: timestamp('committed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index('roster_import_batches_org_created_idx').on(table.orgId, table.createdAt)],
+)
+
+export const rosterForecasts = pgTable(
+  'roster_forecasts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    propertyId: uuid('property_id').notNull().references(() => properties.id, { onDelete: 'cascade' }),
+    forecastDate: date('forecast_date').notNull(),
+    occupancyPercent: numeric('occupancy_percent', { precision: 5, scale: 2 }).notNull(),
+    arrivalsCount: integer('arrivals_count').default(0).notNull(),
+    departuresCount: integer('departures_count').default(0).notNull(),
+    source: rosterInputSourceEnum('source').notNull(),
+    importBatchId: uuid('import_batch_id').references(() => rosterImportBatches.id, { onDelete: 'set null' }),
+    updatedBy: uuid('updated_by').references(() => profiles.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('roster_forecasts_property_date_unique').on(table.propertyId, table.forecastDate),
+    index('roster_forecasts_property_date_idx').on(table.propertyId, table.forecastDate),
+  ],
+)
+
+export const rosterUnavailability = pgTable(
+  'roster_unavailability',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    employeeId: uuid('employee_id').notNull().references(() => rosterEmployees.id, { onDelete: 'cascade' }),
+    startDate: date('start_date').notNull(),
+    endDate: date('end_date').notNull(),
+    type: varchar('type', { length: 50 }).notNull(),
+    source: rosterInputSourceEnum('source').notNull(),
+    externalReference: text('external_reference'),
+    operationalNote: text('operational_note'),
+    importBatchId: uuid('import_batch_id').references(() => rosterImportBatches.id, { onDelete: 'set null' }),
+    createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index('roster_unavailability_employee_dates_idx').on(table.employeeId, table.startDate, table.endDate)],
+)
+
+export const rosterBoundaryAssignments = pgTable(
+  'roster_boundary_assignments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    employeeId: uuid('employee_id').notNull().references(() => rosterEmployees.id, { onDelete: 'cascade' }),
+    assignmentDate: date('assignment_date').notNull(),
+    workingMinutes: integer('working_minutes').default(0).notNull(),
+    restCategory: rosterRestCategoryEnum('rest_category').default('none').notNull(),
+    source: rosterInputSourceEnum('source').notNull(),
+    recordedBy: uuid('recorded_by').references(() => profiles.id, { onDelete: 'set null' }),
+    importBatchId: uuid('import_batch_id').references(() => rosterImportBatches.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [unique('roster_boundary_employee_date_unique').on(table.employeeId, table.assignmentDate)],
+)
+
+export const rosterCycles = pgTable(
+  'roster_cycles',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: uuid('org_id').notNull().references(() => organizations.id),
+    hubId: uuid('hub_id').notNull().references(() => rosterHubs.id, { onDelete: 'restrict' }),
+    month: date('month').notNull(),
+    revision: integer('revision').default(1).notNull(),
+    status: rosterCycleStatusEnum('status').default('draft').notNull(),
+    policyVersionId: uuid('policy_version_id').notNull().references(() => rosterPolicyVersions.id, { onDelete: 'restrict' }),
+    version: integer('version').default(1).notNull(),
+    createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+    submittedBy: uuid('submitted_by').references(() => profiles.id, { onDelete: 'set null' }),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    publishedBy: uuid('published_by').references(() => profiles.id, { onDelete: 'set null' }),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('roster_cycles_hub_month_revision_unique').on(table.hubId, table.month, table.revision),
+    index('roster_cycles_hub_month_revision_idx').on(table.hubId, table.month, table.revision),
+  ],
+)
+
+export const rosters = pgTable(
+  'rosters',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    cycleId: uuid('cycle_id').notNull().references(() => rosterCycles.id, { onDelete: 'cascade' }),
+    propertyId: uuid('property_id').notNull().references(() => properties.id, { onDelete: 'restrict' }),
+    status: rosterChildStatusEnum('status').default('draft').notNull(),
+    submittedBy: uuid('submitted_by').references(() => profiles.id, { onDelete: 'set null' }),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [unique('rosters_cycle_property_unique').on(table.cycleId, table.propertyId)],
+)
+
+export const rosterInputSnapshots = pgTable('roster_input_snapshots', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  cycleId: uuid('cycle_id').notNull().unique().references(() => rosterCycles.id, { onDelete: 'cascade' }),
+  checksum: varchar('checksum', { length: 128 }).notNull(),
+  normalizedInput: jsonb('normalized_input').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const rosterParticipants = pgTable(
+  'roster_participants',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    cycleId: uuid('cycle_id').notNull().references(() => rosterCycles.id, { onDelete: 'cascade' }),
+    employeeId: uuid('employee_id').references(() => rosterEmployees.id, { onDelete: 'set null' }),
+    employeeNumber: varchar('employee_number', { length: 80 }).notNull(),
+    fullName: text('full_name').notNull(),
+    basePropertyId: uuid('base_property_id').notNull().references(() => properties.id, { onDelete: 'restrict' }),
+    primaryRoleId: uuid('primary_role_id').notNull().references(() => rosterRoles.id, { onDelete: 'restrict' }),
+    roleCode: varchar('role_code', { length: 80 }).notNull(),
+    departmentCode: varchar('department_code', { length: 80 }).notNull(),
+    laborTier: rosterLaborTierEnum('labor_tier').notNull(),
+    residencyType: rosterResidencyTypeEnum('residency_type').notNull(),
+    skillCodes: varchar('skill_codes', { length: 80 }).array().default(sql`'{}'::varchar[]`).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [unique('roster_participants_cycle_employee_number_unique').on(table.cycleId, table.employeeNumber)],
+)
+
+export const rosterAssignments = pgTable(
+  'roster_assignments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    cycleId: uuid('cycle_id').notNull().references(() => rosterCycles.id, { onDelete: 'cascade' }),
+    participantId: uuid('participant_id').notNull().references(() => rosterParticipants.id, { onDelete: 'cascade' }),
+    assignmentDate: date('assignment_date').notNull(),
+    dutyCode: varchar('duty_code', { length: 20 }).notNull(),
+    dutyPropertyId: uuid('duty_property_id').notNull().references(() => properties.id, { onDelete: 'restrict' }),
+    roleId: uuid('role_id').notNull().references(() => rosterRoles.id, { onDelete: 'restrict' }),
+    shiftTemplateId: uuid('shift_template_id').references(() => rosterShiftTemplates.id, { onDelete: 'set null' }),
+    scheduledMinutes: integer('scheduled_minutes').default(0).notNull(),
+    breakMinutes: integer('break_minutes').default(0).notNull(),
+    workingMinutes: integer('working_minutes').default(0).notNull(),
+    source: rosterAssignmentSourceEnum('source').default('generated').notNull(),
+    explanation: text('explanation').notNull(),
+    reasonCodes: jsonb('reason_codes').default(sql`'[]'::jsonb`).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('roster_assignments_cycle_participant_date_unique').on(table.cycleId, table.participantId, table.assignmentDate),
+    index('roster_assignments_cycle_date_property_idx').on(table.cycleId, table.assignmentDate, table.dutyPropertyId),
+  ],
+)
+
+export const rosterAssignmentSegments = pgTable(
+  'roster_assignment_segments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    assignmentId: uuid('assignment_id').notNull().references(() => rosterAssignments.id, { onDelete: 'cascade' }),
+    sortOrder: integer('sort_order').notNull(),
+    startTime: time('start_time').notNull(),
+    endTime: time('end_time').notNull(),
+    endsNextDay: boolean('ends_next_day').default(false).notNull(),
+  },
+  (table) => [unique('roster_assignment_segments_assignment_order_unique').on(table.assignmentId, table.sortOrder)],
+)
+
+export const rosterViolations = pgTable(
+  'roster_violations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    cycleId: uuid('cycle_id').notNull().references(() => rosterCycles.id, { onDelete: 'cascade' }),
+    ruleCode: varchar('rule_code', { length: 100 }).notNull(),
+    severity: rosterViolationSeverityEnum('severity').notNull(),
+    resolution: rosterViolationResolutionEnum('resolution').default('open').notNull(),
+    message: text('message').notNull(),
+    participantId: uuid('participant_id').references(() => rosterParticipants.id, { onDelete: 'cascade' }),
+    propertyId: uuid('property_id').references(() => properties.id, { onDelete: 'restrict' }),
+    violationDate: date('violation_date'),
+    evidence: jsonb('evidence').default(sql`'{}'::jsonb`).notNull(),
+    overrideReason: text('override_reason'),
+    resolvedBy: uuid('resolved_by').references(() => profiles.id, { onDelete: 'set null' }),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index('roster_violations_cycle_severity_resolution_idx').on(table.cycleId, table.severity, table.resolution)],
+)
+
+export const rosterEvents = pgTable(
+  'roster_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    cycleId: uuid('cycle_id').notNull().references(() => rosterCycles.id, { onDelete: 'cascade' }),
+    actorId: uuid('actor_id').references(() => profiles.id, { onDelete: 'set null' }),
+    cycleVersion: integer('cycle_version').notNull(),
+    eventType: varchar('event_type', { length: 80 }).notNull(),
+    context: jsonb('context').default(sql`'{}'::jsonb`).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index('roster_events_cycle_created_idx').on(table.cycleId, table.createdAt)],
+)
+
+export const rosterHubsRelations = relations(rosterHubs, ({ one, many }) => ({
+  organization: one(organizations, { fields: [rosterHubs.orgId], references: [organizations.id] }),
+  propertyLinks: many(rosterHubProperties),
+  cycles: many(rosterCycles),
+}))
+export const rosterHubPropertiesRelations = relations(rosterHubProperties, ({ one }) => ({
+  hub: one(rosterHubs, { fields: [rosterHubProperties.hubId], references: [rosterHubs.id] }),
+  property: one(properties, { fields: [rosterHubProperties.propertyId], references: [properties.id] }),
+}))
+export const rosterEmployeesRelations = relations(rosterEmployees, ({ one, many }) => ({
+  organization: one(organizations, { fields: [rosterEmployees.orgId], references: [organizations.id] }),
+  role: one(rosterRoles, { fields: [rosterEmployees.roleId], references: [rosterRoles.id] }),
+  baseProperty: one(properties, { fields: [rosterEmployees.basePropertyId], references: [properties.id] }),
+  profile: one(profiles, { fields: [rosterEmployees.profileId], references: [profiles.id] }),
+  skills: many(rosterEmployeeSkills),
+}))
+export const rosterCyclesRelations = relations(rosterCycles, ({ one, many }) => ({
+  organization: one(organizations, { fields: [rosterCycles.orgId], references: [organizations.id] }),
+  hub: one(rosterHubs, { fields: [rosterCycles.hubId], references: [rosterHubs.id] }),
+  policyVersion: one(rosterPolicyVersions, { fields: [rosterCycles.policyVersionId], references: [rosterPolicyVersions.id] }),
+  rosters: many(rosters),
+  participants: many(rosterParticipants),
+  assignments: many(rosterAssignments),
+  violations: many(rosterViolations),
+  events: many(rosterEvents),
+}))
+export const rosterAssignmentsRelations = relations(rosterAssignments, ({ one, many }) => ({
+  cycle: one(rosterCycles, { fields: [rosterAssignments.cycleId], references: [rosterCycles.id] }),
+  participant: one(rosterParticipants, { fields: [rosterAssignments.participantId], references: [rosterParticipants.id] }),
+  dutyProperty: one(properties, { fields: [rosterAssignments.dutyPropertyId], references: [properties.id] }),
+  segments: many(rosterAssignmentSegments),
+}))
+
+export type RosterHub = typeof rosterHubs.$inferSelect
+export type NewRosterHub = typeof rosterHubs.$inferInsert
+export type RosterHubProperty = typeof rosterHubProperties.$inferSelect
+export type NewRosterHubProperty = typeof rosterHubProperties.$inferInsert
+export type RosterDepartment = typeof rosterDepartments.$inferSelect
+export type NewRosterDepartment = typeof rosterDepartments.$inferInsert
+export type RosterRole = typeof rosterRoles.$inferSelect
+export type NewRosterRole = typeof rosterRoles.$inferInsert
+export type RosterEmployee = typeof rosterEmployees.$inferSelect
+export type NewRosterEmployee = typeof rosterEmployees.$inferInsert
+export type RosterEmployeeSkill = typeof rosterEmployeeSkills.$inferSelect
+export type NewRosterEmployeeSkill = typeof rosterEmployeeSkills.$inferInsert
+export type RosterPropertySetting = typeof rosterPropertySettings.$inferSelect
+export type NewRosterPropertySetting = typeof rosterPropertySettings.$inferInsert
+export type RosterCadreRequirement = typeof rosterCadreRequirements.$inferSelect
+export type NewRosterCadreRequirement = typeof rosterCadreRequirements.$inferInsert
+export type RosterStaffingBand = typeof rosterStaffingBands.$inferSelect
+export type NewRosterStaffingBand = typeof rosterStaffingBands.$inferInsert
+export type RosterPolicyVersion = typeof rosterPolicyVersions.$inferSelect
+export type NewRosterPolicyVersion = typeof rosterPolicyVersions.$inferInsert
+export type RosterPolicyRule = typeof rosterPolicyRules.$inferSelect
+export type NewRosterPolicyRule = typeof rosterPolicyRules.$inferInsert
+export type RosterShiftTemplate = typeof rosterShiftTemplates.$inferSelect
+export type NewRosterShiftTemplate = typeof rosterShiftTemplates.$inferInsert
+export type RosterShiftTemplateSegment = typeof rosterShiftTemplateSegments.$inferSelect
+export type NewRosterShiftTemplateSegment = typeof rosterShiftTemplateSegments.$inferInsert
+export type RosterImportBatch = typeof rosterImportBatches.$inferSelect
+export type NewRosterImportBatch = typeof rosterImportBatches.$inferInsert
+export type RosterForecast = typeof rosterForecasts.$inferSelect
+export type NewRosterForecast = typeof rosterForecasts.$inferInsert
+export type RosterUnavailability = typeof rosterUnavailability.$inferSelect
+export type NewRosterUnavailability = typeof rosterUnavailability.$inferInsert
+export type RosterBoundaryAssignment = typeof rosterBoundaryAssignments.$inferSelect
+export type NewRosterBoundaryAssignment = typeof rosterBoundaryAssignments.$inferInsert
+export type RosterCycle = typeof rosterCycles.$inferSelect
+export type NewRosterCycle = typeof rosterCycles.$inferInsert
+export type Roster = typeof rosters.$inferSelect
+export type NewRoster = typeof rosters.$inferInsert
+export type RosterInputSnapshot = typeof rosterInputSnapshots.$inferSelect
+export type NewRosterInputSnapshot = typeof rosterInputSnapshots.$inferInsert
+export type RosterParticipant = typeof rosterParticipants.$inferSelect
+export type NewRosterParticipant = typeof rosterParticipants.$inferInsert
+export type RosterAssignment = typeof rosterAssignments.$inferSelect
+export type NewRosterAssignment = typeof rosterAssignments.$inferInsert
+export type RosterAssignmentSegment = typeof rosterAssignmentSegments.$inferSelect
+export type NewRosterAssignmentSegment = typeof rosterAssignmentSegments.$inferInsert
+export type RosterViolation = typeof rosterViolations.$inferSelect
+export type NewRosterViolation = typeof rosterViolations.$inferInsert
+export type RosterEvent = typeof rosterEvents.$inferSelect
+export type NewRosterEvent = typeof rosterEvents.$inferInsert
