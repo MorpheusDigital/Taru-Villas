@@ -14,8 +14,10 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { AssignmentEditDialog } from '@/components/rostering/assignment-edit-dialog'
 import { DayInspector } from '@/components/rostering/day-inspector'
 import { RosterMatrix } from '@/components/rostering/roster-matrix'
+import { RosterWorkflowControls } from '@/components/rostering/roster-workflow-controls'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -39,6 +41,8 @@ type PreviewData = NonNullable<Awaited<ReturnType<typeof getCyclePreview>>>
 
 interface RosterPreviewProps {
   preview: PreviewData
+  isAdmin: boolean
+  accessiblePropertyIds: string[] | null
 }
 
 function monthLabel(value: string): string {
@@ -55,7 +59,11 @@ function stringsFromJson(value: unknown): string[] {
     : []
 }
 
-export function RosterPreview({ preview }: RosterPreviewProps) {
+export function RosterPreview({
+  preview,
+  isAdmin,
+  accessiblePropertyIds,
+}: RosterPreviewProps) {
   const router = useRouter()
   const participants: PresentationParticipant[] = preview.participants.map(
     (participant) => ({
@@ -140,6 +148,12 @@ export function RosterPreview({ preview }: RosterPreviewProps) {
         (item) => item.id === selectedAssignment.participantId,
       ) ?? null
     : null
+  const selectedSourceParticipant = selectedAssignment
+    ? preview.participants.find(
+        (item) => item.id === selectedAssignment.participantId,
+      ) ?? null
+    : null
+  const selectedEmployeeId = selectedSourceParticipant?.employeeId ?? null
   const propertyNames = Object.fromEntries(
     preview.children.map((child) => [child.propertyId, child.propertyName]),
   )
@@ -152,6 +166,19 @@ export function RosterPreview({ preview }: RosterPreviewProps) {
     (total, row) => total + Math.min(row.assigned, row.requiredActive),
     0,
   )
+  const canManageWholeHub =
+    isAdmin ||
+    preview.children.every((child) =>
+      accessiblePropertyIds?.includes(child.propertyId),
+    )
+  const canEditSelected =
+    preview.cycle.status === 'draft' &&
+    selectedAssignment !== null &&
+    selectedSourceParticipant !== null &&
+    selectedEmployeeId !== null &&
+    preview.editOptions !== null &&
+    (accessiblePropertyIds === null ||
+      accessiblePropertyIds.includes(selectedAssignment.dutyPropertyId))
 
   async function regenerate() {
     const replace = window.confirm(
@@ -202,7 +229,7 @@ export function RosterPreview({ preview }: RosterPreviewProps) {
             Policy {preview.cycle.policyVersionId.slice(0, 8)}
           </p>
         </div>
-        {preview.cycle.status === 'draft' && (
+        {preview.cycle.status === 'draft' && canManageWholeHub && (
           <Button variant="outline" onClick={regenerate} disabled={isRegenerating}>
             {isRegenerating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
             {isRegenerating ? 'Regenerating…' : 'Regenerate draft'}
@@ -250,6 +277,16 @@ export function RosterPreview({ preview }: RosterPreviewProps) {
           </CardContent>
         </Card>
       </div>
+
+      <RosterWorkflowControls
+        cycleId={preview.cycle.id}
+        version={preview.cycle.version}
+        status={preview.cycle.status}
+        propertyRosters={preview.children}
+        violations={preview.violations}
+        isAdmin={isAdmin}
+        accessiblePropertyIds={accessiblePropertyIds}
+      />
 
       <div className="flex gap-2 overflow-x-auto pb-1">
         <button
@@ -320,6 +357,32 @@ export function RosterPreview({ preview }: RosterPreviewProps) {
           assignment={selectedAssignment}
           violations={violations}
           propertyNames={propertyNames}
+          footer={
+            canEditSelected &&
+            selectedAssignment &&
+            selectedSourceParticipant &&
+            selectedEmployeeId &&
+            preview.editOptions ? (
+              <AssignmentEditDialog
+                key={selectedAssignment.id}
+                cycleId={preview.cycle.id}
+                version={preview.cycle.version}
+                assignment={selectedAssignment}
+                qualifiedRoleIds={
+                  preview.editOptions.employeeSkills[
+                    selectedEmployeeId
+                  ] ?? []
+                }
+                properties={preview.editOptions.properties.filter(
+                  (property) =>
+                    accessiblePropertyIds === null ||
+                    accessiblePropertyIds.includes(property.id),
+                )}
+                roles={preview.editOptions.roles}
+                shiftTemplates={preview.editOptions.shiftTemplates}
+              />
+            ) : undefined
+          }
         />
       </div>
 

@@ -34,5 +34,11 @@ export default async function RosterCyclePage({
     notFound()
   }
 
-  return <RosterPreview preview={preview} />
+  return (
+    <RosterPreview
+      preview={preview}
+      isAdmin={access.isAdmin}
+      accessiblePropertyIds={access.propertyIds}
+    />
+  )
 }

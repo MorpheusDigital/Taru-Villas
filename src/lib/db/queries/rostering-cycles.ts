@@ -190,5 +190,30 @@ export async function getCyclePreview(orgId: string, cycleId: string) {
     violations,
     inputChecksum: snapshot?.checksum ?? null,
     demandCoverage,
+    editOptions: input
+      ? {
+          properties: input.properties.map(({ id, name, kind }) => ({
+            id,
+            name,
+            kind,
+          })),
+          roles: input.roles.map(({ id, code, name }) => ({ id, code, name })),
+          shiftTemplates: input.shiftTemplates.map(
+            ({ id, code, roleId, workingMinutes, segments: templateSegments }) => ({
+              id,
+              code,
+              roleId,
+              workingMinutes,
+              segments: templateSegments,
+            }),
+          ),
+          employeeSkills: Object.fromEntries(
+            input.employees.map((employee) => [
+              employee.id,
+              employee.skillRoleIds,
+            ]),
+          ),
+        }
+      : null,
   }
 }

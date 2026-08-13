@@ -1,5 +1,6 @@
 'use client'
 
+import type { ReactNode } from 'react'
 import { AlertTriangle, Clock3, MapPin, ShieldAlert } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -16,6 +17,7 @@ interface DayInspectorProps {
   assignment: PresentationAssignment | null
   violations: PresentationViolation[]
   propertyNames: Record<string, string>
+  footer?: ReactNode
 }
 
 export function DayInspector({
@@ -23,6 +25,7 @@ export function DayInspector({
   assignment,
   violations,
   propertyNames,
+  footer,
 }: DayInspectorProps) {
   const inspection = buildDayInspection(participant, assignment, violations)
 
@@ -138,6 +141,8 @@ export function DayInspector({
             ))}
           </div>
         )}
+
+        {footer}
       </CardContent>
     </Card>
   )
