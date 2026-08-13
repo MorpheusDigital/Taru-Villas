@@ -1,14 +1,14 @@
 import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 
-import { calculateDemand } from '../../rostering/demand'
 import { workWeekKey } from '../../rostering/dates'
+import { validateRosterAssignments } from '../../rostering/engine'
 import {
   validateAssignmentEdit,
   validateLifecycleVersion,
   validatePublicationReadiness,
   validateRevisionCreation,
 } from '../../rostering/lifecycle'
-import type { GenerationInput } from '../../rostering/types'
+import type { Assignment, DutyCode, GenerationInput } from '../../rostering/types'
 import { db } from '..'
 import {
   notifications,
@@ -301,48 +301,131 @@ export async function updateRosterAssignment(args: UpdateAssignmentArgs) {
         .returning()
     }
 
-    await tx
-      .delete(rosterViolations)
-      .where(
-        and(
-          eq(rosterViolations.cycleId, cycle.id),
-          eq(rosterViolations.ruleCode, 'UNCOVERED_DEMAND'),
-        ),
-      )
-      .returning()
-    const allAssignments = await tx
-      .select()
-      .from(rosterAssignments)
-      .where(eq(rosterAssignments.cycleId, cycle.id))
-    const uncovered = calculateDemand(input).flatMap((demand) => {
-      const covered = allAssignments.filter(
-        (assignment) =>
-          assignment.assignmentDate === demand.date &&
-          assignment.dutyPropertyId === demand.propertyId &&
-          assignment.roleId === demand.roleId &&
-          ['W', 'S'].includes(assignment.dutyCode) &&
-          assignment.shiftTemplateId !== null,
-      ).length
-      if (covered >= demand.requiredActive) return []
+    const [allAssignments, allParticipants, allSegments, priorViolations] =
+      await Promise.all([
+        tx
+          .select()
+          .from(rosterAssignments)
+          .where(eq(rosterAssignments.cycleId, cycle.id)),
+        tx
+          .select()
+          .from(rosterParticipants)
+          .where(eq(rosterParticipants.cycleId, cycle.id)),
+        tx
+          .select()
+          .from(rosterAssignmentSegments)
+          .innerJoin(
+            rosterAssignments,
+            eq(rosterAssignments.id, rosterAssignmentSegments.assignmentId),
+          )
+          .where(eq(rosterAssignments.cycleId, cycle.id)),
+        tx
+          .select()
+          .from(rosterViolations)
+          .where(eq(rosterViolations.cycleId, cycle.id)),
+      ])
+    const employeeByNumber = new Map(
+      input.employees.map((inputEmployee) => [
+        inputEmployee.employeeNumber,
+        inputEmployee,
+      ]),
+    )
+    const participantById = new Map(
+      allParticipants.map((participant) => [participant.id, participant]),
+    )
+    const segmentsByAssignment = new Map<
+      string,
+      Assignment['segments']
+    >()
+    for (const row of allSegments) {
+      const segment = row.roster_assignment_segments
+      const grouped = segmentsByAssignment.get(segment.assignmentId) ?? []
+      grouped.push({
+        startTime: segment.startTime.slice(0, 5),
+        endTime: segment.endTime.slice(0, 5),
+        endsNextDay: segment.endsNextDay,
+        sortOrder: segment.sortOrder,
+      })
+      segmentsByAssignment.set(segment.assignmentId, grouped)
+    }
+    const engineAssignments = allAssignments.flatMap((assignment) => {
+      const participant = participantById.get(assignment.participantId)
+      const inputEmployee = participant
+        ? employeeByNumber.get(participant.employeeNumber)
+        : undefined
+      if (!participant || !inputEmployee) return []
       return [
         {
-          cycleId: cycle.id,
-          ruleCode: 'UNCOVERED_DEMAND',
-          severity: 'hard' as const,
-          resolution: 'open' as const,
-          message: `${demand.requiredActive - covered} required assignment(s) remain uncovered.`,
-          propertyId: demand.propertyId,
-          violationDate: demand.date,
-          evidence: {
-            roleId: demand.roleId,
-            requiredActive: demand.requiredActive,
-            covered,
-          },
-        },
+          employeeId: inputEmployee.id,
+          date: assignment.assignmentDate,
+          basePropertyId: participant.basePropertyId,
+          dutyPropertyId: assignment.dutyPropertyId,
+          roleId: assignment.roleId,
+          dutyCode: assignment.dutyCode as DutyCode,
+          shiftTemplateId: assignment.shiftTemplateId,
+          scheduledMinutes: assignment.scheduledMinutes,
+          breakMinutes: assignment.breakMinutes,
+          workingMinutes: assignment.workingMinutes,
+          segments: segmentsByAssignment.get(assignment.id) ?? [],
+          reasonCodes: Array.isArray(assignment.reasonCodes)
+            ? assignment.reasonCodes.filter(
+                (reason): reason is string => typeof reason === 'string',
+              )
+            : [],
+          explanation: assignment.explanation,
+        } satisfies Assignment,
       ]
     })
-    if (uncovered.length > 0) {
-      await tx.insert(rosterViolations).values(uncovered).returning()
+    const revalidated = validateRosterAssignments(input, engineAssignments)
+    const participantIdByEmployee = new Map(
+      allParticipants.flatMap((participant) => {
+        const inputEmployee = employeeByNumber.get(participant.employeeNumber)
+        return inputEmployee ? [[inputEmployee.id, participant.id] as const] : []
+      }),
+    )
+    const replaceableViolationIds = priorViolations
+      .filter((violation) => violation.ruleCode !== 'SOURCE_DATA_CHANGED')
+      .map((violation) => violation.id)
+    if (replaceableViolationIds.length > 0) {
+      await tx
+        .delete(rosterViolations)
+        .where(inArray(rosterViolations.id, replaceableViolationIds))
+        .returning()
+    }
+    if (revalidated.length > 0) {
+      await tx
+        .insert(rosterViolations)
+        .values(
+          revalidated.map((violation) => {
+            const participantId = violation.employeeId
+              ? (participantIdByEmployee.get(violation.employeeId) ?? null)
+              : null
+            const prior = priorViolations.find(
+              (row) =>
+                row.ruleCode === violation.ruleCode &&
+                row.participantId === participantId &&
+                row.propertyId === violation.propertyId &&
+                row.violationDate === violation.date &&
+                JSON.stringify(row.evidence) === JSON.stringify(violation.evidence),
+            )
+            const preserveOverride = prior?.resolution === 'overridden'
+            return {
+              cycleId: cycle.id,
+              ruleCode: violation.ruleCode,
+              severity: violation.severity,
+              resolution: preserveOverride ? ('overridden' as const) : ('open' as const),
+              message: violation.message,
+              participantId,
+              propertyId: violation.propertyId,
+              violationDate: violation.date,
+              evidence: violation.evidence,
+              overrideReason: preserveOverride ? prior.overrideReason : null,
+              resolvedBy: preserveOverride ? prior.resolvedBy : null,
+              resolvedAt: preserveOverride ? prior.resolvedAt : null,
+            }
+          }),
+        )
+        .returning()
     }
 
     const nextVersion = cycle.version + 1

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { generateRoster } from './engine'
+import { generateRoster, validateRosterAssignments } from './engine'
 import type {
   EngineEmployee,
   EngineRole,
@@ -317,6 +317,18 @@ describe('generateRoster', () => {
     expect(spokeDays.filter((item) => overlapDates.has(item.date))).toHaveLength(7)
     expect(result.violations).not.toContainEqual(
       expect.objectContaining({ ruleCode: 'AREA_MANAGER_COVERAGE' }),
+    )
+
+    const manuallyChanged = result.assignments.map((assignment) =>
+      assignment.employeeId === 'employee-001' && assignment.dutyCode === 'S'
+        ? { ...assignment, dutyCode: 'W' as const }
+        : assignment,
+    )
+    expect(validateRosterAssignments(input, manuallyChanged)).toContainEqual(
+      expect.objectContaining({
+        ruleCode: 'AREA_MANAGER_COVERAGE',
+        severity: 'hard',
+      }),
     )
   })
 

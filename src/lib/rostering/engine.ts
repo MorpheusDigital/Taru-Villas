@@ -97,7 +97,6 @@ function sortedEmployees(input: GenerationInput): EngineEmployee[] {
 function allocateAreaManagers(
   input: GenerationInput,
   assignments: Map<string, Assignment>,
-  violations: Violation[],
 ): void {
   const roles = new Map(input.roles.map((item) => [item.id, item]))
   const employees = sortedEmployees(input)
@@ -143,29 +142,81 @@ function allocateAreaManagers(
       )
     }
 
-    const overlapCount = selected.filter((date) => overlapSet.has(date)).length
+  }
+}
+
+function validateAreaManagerCoverage(
+  input: GenerationInput,
+  assignments: Assignment[],
+  violations: Violation[],
+): void {
+  const roles = new Map(input.roles.map((item) => [item.id, item]))
+  const spokeIds = new Set(
+    input.properties
+      .filter((property) => property.kind === 'spoke')
+      .map((property) => property.id),
+  )
+  if (spokeIds.size === 0) return
+
+  const assignmentsByEmployeeDate = new Map(
+    assignments.map((assignment) => [
+      assignmentKey(assignment.employeeId, assignment.date),
+      assignment,
+    ]),
+  )
+  for (const manager of sortedEmployees(input).filter(
+    (employee) => roles.get(employee.roleId)?.isAreaManager,
+  )) {
+    const spokeAssignments = assignments.filter(
+      (assignment) =>
+        assignment.employeeId === manager.id &&
+        assignment.dutyCode === 'S' &&
+        spokeIds.has(assignment.dutyPropertyId),
+    )
+    const overlapCount = spokeAssignments.filter((assignment) =>
+      input.employees.some((employee) => {
+        if (
+          employee.basePropertyId !== assignment.dutyPropertyId ||
+          !roles.get(employee.roleId)?.isPropertyManager
+        ) {
+          return false
+        }
+        const managerDay = assignmentsByEmployeeDate.get(
+          assignmentKey(employee.id, assignment.date),
+        )
+        return Boolean(
+          managerDay &&
+            ['O', 'H', 'AL', 'SL', 'LIEU', 'TRN'].includes(
+              managerDay.dutyCode,
+            ) &&
+            !managerDay.reasonCodes.includes('UNALLOCATED_AVAILABLE'),
+        )
+      }),
+    ).length
+
     if (
-      selected.length !== input.policy.areaManagerSpokeDays ||
-      overlapCount < input.policy.areaManagerOverlapDays
+      spokeAssignments.length === input.policy.areaManagerSpokeDays &&
+      overlapCount >= input.policy.areaManagerOverlapDays
     ) {
-      violations.push(
-        violation(
-          'AREA_MANAGER_COVERAGE',
-          'hard',
-          `Area Manager ${manager.employeeNumber} cannot meet the spoke-duty overlap rule.`,
-          {
-            employeeId: manager.id,
-            propertyId: spoke.id,
-            evidence: {
-              requiredSpokeDays: input.policy.areaManagerSpokeDays,
-              assignedSpokeDays: selected.length,
-              requiredOverlapDays: input.policy.areaManagerOverlapDays,
-              assignedOverlapDays: overlapCount,
-            },
-          },
-        ),
-      )
+      continue
     }
+    violations.push(
+      violation(
+        'AREA_MANAGER_COVERAGE',
+        'hard',
+        `Area Manager ${manager.employeeNumber} does not meet the spoke-duty overlap rule.`,
+        {
+          employeeId: manager.id,
+          propertyId: spokeAssignments[0]?.dutyPropertyId ?? [...spokeIds][0],
+          evidence: {
+            requiredSpokeDays: input.policy.areaManagerSpokeDays,
+            assignedSpokeDays: spokeAssignments.length,
+            requiredOverlapDays: input.policy.areaManagerOverlapDays,
+            assignedOverlapDays: overlapCount,
+          },
+        },
+      ),
+    )
   }
 }
 
@@ -456,6 +507,23 @@ function validateMinutesAndTargets(
   }
 }
 
+export function validateRosterAssignments(
+  input: GenerationInput,
+  assignments: Assignment[],
+): Violation[] {
+  const violations: Violation[] = []
+  validateAreaManagerCoverage(input, assignments, violations)
+  validateCoverage(calculateDemand(input), assignments, violations)
+  validateMinutesAndTargets(input, assignments, violations)
+  return violations.sort(
+    (left, right) =>
+      left.ruleCode.localeCompare(right.ruleCode) ||
+      (left.employeeId ?? '').localeCompare(right.employeeId ?? '') ||
+      (left.propertyId ?? '').localeCompare(right.propertyId ?? '') ||
+      (left.date ?? '').localeCompare(right.date ?? ''),
+  )
+}
+
 export function generateRoster(input: GenerationInput): GenerationResult {
   const demand = calculateDemand(input)
   const availability = buildAvailability(input)
@@ -478,7 +546,7 @@ export function generateRoster(input: GenerationInput): GenerationResult {
     }
   }
 
-  allocateAreaManagers(input, assignments, violations)
+  allocateAreaManagers(input, assignments)
   allocateDemand(input, demand, assignments)
   applyShiftTemplates(input, assignments, violations)
 
@@ -487,8 +555,7 @@ export function generateRoster(input: GenerationInput): GenerationResult {
       left.employeeId.localeCompare(right.employeeId) ||
       left.date.localeCompare(right.date),
   )
-  validateCoverage(demand, orderedAssignments, violations)
-  validateMinutesAndTargets(input, orderedAssignments, violations)
+  violations.push(...validateRosterAssignments(input, orderedAssignments))
 
   violations.sort(
     (left, right) =>
