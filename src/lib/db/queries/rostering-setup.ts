@@ -90,6 +90,65 @@ function unavailabilityDutyCode(type: string): Extract<
   return 'TRN'
 }
 
+export async function listActiveRosteringHubs(orgId: string) {
+  const rows = await db
+    .select({
+      hubId: rosterHubs.id,
+      hubName: rosterHubs.name,
+      hubCode: rosterHubs.code,
+      propertyId: properties.id,
+      propertyName: properties.name,
+      propertyCode: properties.code,
+      kind: rosterHubProperties.kind,
+    })
+    .from(rosterHubs)
+    .innerJoin(
+      rosterHubProperties,
+      eq(rosterHubProperties.hubId, rosterHubs.id),
+    )
+    .innerJoin(properties, eq(properties.id, rosterHubProperties.propertyId))
+    .where(
+      and(
+        eq(rosterHubs.orgId, orgId),
+        eq(rosterHubs.isActive, true),
+        eq(rosterHubProperties.isActive, true),
+        eq(properties.isActive, true),
+      ),
+    )
+    .orderBy(asc(rosterHubs.name), asc(properties.name))
+
+  const hubs = new Map<
+    string,
+    {
+      id: string
+      name: string
+      code: string
+      properties: Array<{
+        id: string
+        name: string
+        code: string
+        kind: 'hub' | 'spoke'
+      }>
+    }
+  >()
+  for (const row of rows) {
+    const hub = hubs.get(row.hubId) ?? {
+      id: row.hubId,
+      name: row.hubName,
+      code: row.hubCode,
+      properties: [],
+    }
+    hub.properties.push({
+      id: row.propertyId,
+      name: row.propertyName,
+      code: row.propertyCode,
+      kind: row.kind,
+    })
+    hubs.set(row.hubId, hub)
+  }
+  return [...hubs.values()]
+}
+
 export async function buildGenerationInput(
   orgId: string,
   hubId: string,
