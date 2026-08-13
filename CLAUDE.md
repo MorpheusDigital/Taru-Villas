@@ -2,7 +2,7 @@
 
 ## Overview
 
-Taru Villas is a **Next.js 16 survey management and quality assessment platform** for hotel property management. It features weighted scoring analytics, guest surveys, automatic task/issue tracking from low-score responses, and role-based access control.
+Taru Villas is a **Next.js 16 hotel operations portal** covering surveys, property quality, tasks, assets, fleet, and TaruShift workforce rostering with role-based access control.
 
 ## Tech Stack
 
@@ -28,6 +28,7 @@ src/
 │   ├── (portal)/         # Authenticated routes
 │   │   ├── admin/        # Admin-only pages (properties, users, templates, tasks)
 │   │   ├── dashboard/    # Dashboard overview + property dashboards
+│   │   ├── rostering/    # TaruShift generation and roster preview
 │   │   ├── surveys/      # Survey list, creation, detail views
 │   │   ├── tasks/        # Task list + detail (admin & PM)
 │   │   └── settings/     # User settings
@@ -59,7 +60,9 @@ src/
 │   │       ├── profiles.ts
 │   │       ├── tasks.ts
 │   │       ├── guest-links.ts
-│   │       └── dashboard.ts
+│   │       ├── dashboard.ts
+│   │       ├── rostering-setup.ts
+│   │       └── rostering-cycles.ts
 │   ├── supabase/
 │   │   ├── server.ts     # Server-side Supabase client
 │   │   ├── admin.ts      # Service-role Supabase client
@@ -128,6 +131,7 @@ organizations (multi-tenant root)
 | `/surveys` (list/create) | All | All | All |
 | `/admin/*` pages | Full CRUD | No access | No access |
 | `/tasks` | All org tasks | Assigned property tasks | No access (403) |
+| `/rostering` management | All hubs | Hubs where assigned to every active property | No access |
 | Property/User CRUD APIs | Full | Read only | Read only |
 
 ### Auth Guards (`src/lib/auth/guards.ts`)
@@ -162,6 +166,17 @@ Set `DEV_BYPASS_AUTH=true` to skip auth (returns mock admin profile).
 
 ### Fixed Asset Registry
 - Property-scoped asset registry with rooms, straight-line depreciation (computed on read), maintenance logs, QR labels + mobile scan, guard-layer RBAC (staff financial-blind); routes under `/assets`
+
+### TaruShift Rostering
+- Pure deterministic hub-month engine under `src/lib/rostering/`
+- Workforce records are separate from authenticated profiles; linking is nullable and explicit
+- Admins can generate any hub; property managers must be assigned to every active property in a hub to generate it
+- Forecasts, approved unavailability, prior-week boundary context, effective policy/configuration, and shift templates are preflight requirements
+- Draft cycles persist frozen participants, assignments, shift segments, violations, input checksum/snapshot, and append-only events
+- `/rostering` provides draft generation; `/rostering/[cycleId]` provides a read-only employee-by-day matrix and day inspector
+- Phase 1 foundation does not yet include CSV setup screens, manual edits, warning overrides, submission, publication, revisions, staff self-view, or exports
+- Schema migration: `drizzle/0028_tarushift_foundation.sql`
+- Demo seed: `npm run seed:tarushift-demo -- HUB_PROPERTY_UUID SPOKE_PROPERTY_UUID YYYY-MM`
 
 ## Critical Implementation Notes
 
