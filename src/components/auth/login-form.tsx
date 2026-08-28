@@ -41,7 +41,7 @@ function LoginFormContent({ inviteOnly }: { inviteOnly: boolean }) {
 
     try {
       if (isSignUp && !inviteOnly) {
-        const { error: signUpError } = await supabase.auth.signUp({
+        const { data, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
           options: { data: { full_name: email.split('@')[0] } },
@@ -49,6 +49,12 @@ function LoginFormContent({ inviteOnly }: { inviteOnly: boolean }) {
 
         if (signUpError) {
           setFormError(signUpError.message)
+          return
+        }
+
+        if (!data.session) {
+          setFormError('Check your email to confirm your account, then sign in to finish setup.')
+          setIsSignUp(false)
           return
         }
 
@@ -67,6 +73,15 @@ function LoginFormContent({ inviteOnly }: { inviteOnly: boolean }) {
       if (signInError) {
         setFormError(signInError.message)
         return
+      }
+
+      if (!inviteOnly) {
+        const provisionResponse = await fetch('/api/auth/provision', { method: 'POST' })
+        if (!provisionResponse.ok) {
+          const body = await provisionResponse.json().catch(() => ({}))
+          setFormError(body.error ?? 'Failed to set up your account.')
+          return
+        }
       }
 
       router.push('/dashboard')

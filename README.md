@@ -9,6 +9,23 @@ Set the Client 1 production modules as follows (leave unset only in the legacy i
 CLIENT_ENABLED_MODULES=dashboard,tasks,surveys,fleet
 ```
 
+## Client 1 access
+
+Client 1 is invite-only. Set the following in its deployment environment:
+
+```bash
+CLIENT_INVITE_ONLY=true
+```
+
+Before launch, disable public sign-ups in the dedicated Client 1 Supabase
+project. This is required because the Supabase anonymous key is available to
+the browser; hiding the application sign-up control alone cannot prevent direct
+calls to Supabase Auth. Invite users through the portal after creating the
+initial administrator through the trusted deployment/bootstrap process.
+
+Leave `CLIENT_INVITE_ONLY` unset only for the legacy internal environment,
+which retains its self-service onboarding flow.
+
 ## Getting Started
 
 First, run the development server:
