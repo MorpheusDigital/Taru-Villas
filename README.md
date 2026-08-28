@@ -1,5 +1,14 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Production modules
+
+Set the Client 1 production modules as follows (leave unset only in the legacy internal environment):
+
+```bash
+# Client 1 production modules; leave unset only in the legacy internal environment.
+CLIENT_ENABLED_MODULES=dashboard,tasks,surveys,fleet
+```
+
 ## Getting Started
 
 First, run the development server:
