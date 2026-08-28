@@ -4,13 +4,13 @@ import { getEnabledClientModules, isPathEnabled } from '@/lib/client-release/mod
 import { isInviteOnlyLaunchReady } from '@/lib/auth/client-access'
 
 export async function middleware(request: NextRequest) {
+  if (!isInviteOnlyLaunchReady()) {
+    return new NextResponse('Client access is not configured', { status: 503 })
+  }
+
   // --- DEV BYPASS: skip all auth checks for testing ---
   if (process.env.DEV_BYPASS_AUTH === 'true') {
     return NextResponse.next()
-  }
-
-  if (!isInviteOnlyLaunchReady()) {
-    return new NextResponse('Client access is not configured', { status: 503 })
   }
 
   const enabledModules = getEnabledClientModules()
