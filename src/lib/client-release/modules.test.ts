@@ -39,6 +39,11 @@ describe('Client module policy', () => {
     expect(isPathEnabled('/m/example-menu', enabled)).toBe(false)
   })
 
+  it('keeps legacy clients unrestricted while enforcing configured modules', () => {
+    expect(isPathEnabled('/fleet', new Set())).toBe(true)
+    expect(isPathEnabled('/sops', getEnabledClientModules('dashboard,tasks,surveys,fleet'))).toBe(false)
+  })
+
   it('never blocks auth or PWA infrastructure', () => {
     const enabled = getEnabledClientModules('dashboard,tasks,surveys,fleet')
     expect(isPathEnabled('/login', enabled)).toBe(true)

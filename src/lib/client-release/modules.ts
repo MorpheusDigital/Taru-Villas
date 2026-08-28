@@ -111,5 +111,5 @@ export function moduleForPath(pathname: string): ClientModule | undefined {
 export function isPathEnabled(pathname: string, enabled: Set<ClientModule>): boolean {
   const clientModule = moduleForPath(pathname)
 
-  return !clientModule || clientModule === 'core' || enabled.has(clientModule)
+  return enabled.size === 0 || !clientModule || clientModule === 'core' || enabled.has(clientModule)
 }

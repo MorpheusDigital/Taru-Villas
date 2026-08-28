@@ -25,7 +25,7 @@ import {
 import { useAuth } from '@/components/providers/auth-provider'
 import { getFleetNavigationItems } from '@/lib/fleet/navigation'
 import { createClient } from '@/lib/supabase/client'
-import type { ClientModule } from '@/lib/client-release/modules'
+import { isPathEnabled, type ClientModule } from '@/lib/client-release/modules'
 
 import {
   Sidebar,
@@ -144,21 +144,22 @@ export function AppSidebar() {
 
   const isFleetAdmin = profile.isFleetAdmin || profile.role === 'admin'
   const canSeeFleet = profile.canBookFleet || isFleetAdmin
-  const fleetNavItems = enabledModules.includes('fleet')
+  const enabledSet = new Set(enabledModules)
+  const fleetNavItems = isPathEnabled('/fleet', enabledSet)
     ? getFleetNavigationItems(canSeeFleet, isFleetAdmin)
     : []
 
   const visibleMainNavItems = mainNavItems.filter((item) => {
-    if (!enabledModules.includes(item.module) && item.module !== 'core') return false
+    if (!isPathEnabled(item.href, enabledSet)) return false
     if (item.href === '/dashboard') return showAdminSection
     if (item.href === '/rostering') return showPropertySection
     return true
   })
   const visiblePropertyNavItems = propertyNavItems.filter(
-    (item) => enabledModules.includes(item.module) || item.module === 'core'
+    (item) => isPathEnabled(item.href, enabledSet)
   )
   const visibleAdminNavItems = adminNavItems.filter(
-    (item) => enabledModules.includes(item.module) || item.module === 'core'
+    (item) => isPathEnabled(item.href, enabledSet)
   )
 
   return (
