@@ -12,6 +12,7 @@ export type ClientModule =
   | 'guest-profiles'
   | 'utilities'
   | 'settings'
+  | 'allowed-emails'
   | 'core'
 
 const clientModules: readonly ClientModule[] = [
@@ -28,6 +29,7 @@ const clientModules: readonly ClientModule[] = [
   'guest-profiles',
   'utilities',
   'settings',
+  'allowed-emails',
   'core',
 ]
 
@@ -56,6 +58,9 @@ const moduleRoutes: readonly [string, ClientModule][] = [
   ['/issues', 'tasks'],
   ['/api/dashboard', 'dashboard'],
   ['/dashboard', 'dashboard'],
+  ['/admin/allowed-emails', 'allowed-emails'],
+  ['/api/admin/allowed-emails', 'allowed-emails'],
+  ['/api/auth/check-whitelist', 'allowed-emails'],
   ['/admin/users', 'core'],
   ['/api/users', 'core'],
   ['/admin/properties', 'core'],

@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getProfile } from '@/lib/auth/guards'
-import { parseInviteUser } from '@/lib/auth/invitations'
-import { getProfiles, createProfile, getProfileByEmail } from '@/lib/db/queries/profiles'
+import {
+  inviteUserForOrganization,
+  parseInviteUser,
+} from '@/lib/auth/invitations'
+import { getProfiles, getProfileByEmail } from '@/lib/db/queries/profiles'
 import { getProperties } from '@/lib/db/queries/properties'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { db } from '@/lib/db'
-import { propertyAssignments } from '@/lib/db/schema'
+import { profiles, propertyAssignments } from '@/lib/db/schema'
 
 // ---------------------------------------------------------------------------
 // GET /api/users
@@ -62,63 +65,54 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { email, fullName, role, propertyIds } = parsed.data
-    const organizationProperties = await getProperties(profile.orgId)
-    const organizationPropertyIds = new Set(
-      organizationProperties.map((property) => property.id)
-    )
-
-    if (propertyIds.some((propertyId) => !organizationPropertyIds.has(propertyId))) {
-      return NextResponse.json(
-        { error: 'Forbidden: property does not belong to your organization' },
-        { status: 403 }
-      )
-    }
-
-    // Check if user already exists
-    const existingProfile = await getProfileByEmail(email)
-    if (existingProfile) {
-      return NextResponse.json(
-        { error: 'A user with this email already exists' },
-        { status: 409 }
-      )
-    }
-
-    // Create auth user via Supabase admin client (sends invite email)
     const supabaseAdmin = createAdminClient()
-    const { data: authData, error: authError } =
-      await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-        data: { full_name: fullName, role },
-      })
+    const result = await inviteUserForOrganization(profile, parsed.data, {
+      getOrganizationPropertyIds: async (orgId) => {
+        const organizationProperties = await getProperties(orgId)
+        return organizationProperties.map((property) => property.id)
+      },
+      getExistingProfile: getProfileByEmail,
+      inviteUserByEmail: async ({ email, fullName, role }) => {
+        const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+          email,
+          { data: { full_name: fullName, role } }
+        )
+        if (error) throw error
+        return { id: data.user.id }
+      },
+      persistInvitedUser: async ({ propertyIds, ...profileData }) =>
+        db.transaction(async (tx) => {
+          const [newProfile] = await tx
+            .insert(profiles)
+            .values(profileData)
+            .returning()
 
-    if (authError) {
-      console.error('Supabase invite error:', authError)
-      return NextResponse.json(
-        { error: `Failed to create auth user: ${authError.message}` },
-        { status: 500 }
-      )
-    }
+          if (propertyIds.length > 0) {
+            await tx.insert(propertyAssignments).values(
+              propertyIds.map((propertyId) => ({
+                userId: newProfile.id,
+                propertyId,
+              }))
+            )
+          }
 
-    // Create profile in our database
-    const newProfile = await createProfile({
-      id: authData.user.id,
-      orgId: profile.orgId,
-      email,
-      fullName,
-      role,
+          return newProfile
+        }),
+      deleteInvitedUser: async (userId) => {
+        const { error } = await supabaseAdmin.auth.admin.deleteUser(userId)
+        if (error) throw error
+      },
+      logError: (message, error) => console.error(`${message}:`, error),
     })
 
-    // Create property assignments
-    if (propertyIds.length > 0) {
-      await db.insert(propertyAssignments).values(
-        propertyIds.map((propertyId) => ({
-          userId: newProfile.id,
-          propertyId,
-        }))
+    if (!result.ok) {
+      return NextResponse.json(
+        { error: result.error },
+        { status: result.status }
       )
     }
 
-    return NextResponse.json(newProfile, { status: 201 })
+    return NextResponse.json(result.profile, { status: result.status })
   } catch (error) {
     console.error('POST /api/users error:', error)
     return NextResponse.json(

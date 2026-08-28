@@ -39,6 +39,19 @@ describe('Client module policy', () => {
     expect(isPathEnabled('/m/example-menu', enabled)).toBe(false)
   })
 
+  it('gates legacy allowed-email routes behind their own module', () => {
+    const clientOneModules = getEnabledClientModules('dashboard,tasks,surveys,fleet')
+    const legacyModules = getEnabledClientModules('')
+
+    expect(moduleForPath('/admin/allowed-emails')).toBe('allowed-emails')
+    expect(moduleForPath('/api/admin/allowed-emails')).toBe('allowed-emails')
+    expect(moduleForPath('/api/auth/check-whitelist')).toBe('allowed-emails')
+    expect(isPathEnabled('/admin/allowed-emails', clientOneModules)).toBe(false)
+    expect(isPathEnabled('/api/admin/allowed-emails', clientOneModules)).toBe(false)
+    expect(isPathEnabled('/api/auth/check-whitelist', clientOneModules)).toBe(false)
+    expect(isPathEnabled('/admin/allowed-emails', legacyModules)).toBe(true)
+  })
+
   it('keeps legacy clients unrestricted while enforcing configured modules', () => {
     expect(isPathEnabled('/fleet', new Set())).toBe(true)
     expect(isPathEnabled('/sops', getEnabledClientModules('dashboard,tasks,surveys,fleet'))).toBe(false)

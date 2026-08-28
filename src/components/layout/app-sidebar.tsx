@@ -85,7 +85,7 @@ const propertyNavItems: NavItem[] = [
 const adminNavItems: NavItem[] = [
   { title: 'Property Settings', href: '/admin/properties', icon: Building2, module: 'core' },
   { title: 'Users', href: '/admin/users', icon: Users, module: 'core' },
-  { title: 'Allowed Emails', href: '/admin/allowed-emails', icon: ShieldCheck, module: 'core' },
+  { title: 'Allowed Emails', href: '/admin/allowed-emails', icon: ShieldCheck, module: 'allowed-emails' },
 ]
 
 // ---------------------------------------------------------------------------
