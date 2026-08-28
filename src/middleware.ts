@@ -1,10 +1,16 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { getEnabledClientModules, isPathEnabled } from '@/lib/client-release/modules'
 
 export async function middleware(request: NextRequest) {
   // --- DEV BYPASS: skip all auth checks for testing ---
   if (process.env.DEV_BYPASS_AUTH === 'true') {
     return NextResponse.next()
+  }
+
+  const enabledModules = getEnabledClientModules()
+  if (enabledModules.size > 0 && !isPathEnabled(request.nextUrl.pathname, enabledModules)) {
+    return new NextResponse('Not Found', { status: 404 })
   }
 
   // Skip if Supabase env vars are not configured

@@ -91,7 +91,7 @@ const moduleRoutes: readonly [string, ClientModule][] = [
 ]
 
 export function getEnabledClientModules(value?: string): Set<ClientModule> {
-  const configuredModules = new Set((value ?? '').split(',').map((module) => module.trim()))
+  const configuredModules = new Set((value ?? process.env.CLIENT_ENABLED_MODULES ?? '').split(',').map((module) => module.trim()))
 
   return new Set(clientModules.filter((module) => configuredModules.has(module)))
 }
@@ -109,7 +109,7 @@ export function moduleForPath(pathname: string): ClientModule | undefined {
 }
 
 export function isPathEnabled(pathname: string, enabled: Set<ClientModule>): boolean {
-  const module = moduleForPath(pathname)
+  const clientModule = moduleForPath(pathname)
 
-  return !module || module === 'core' || enabled.has(module)
+  return !clientModule || clientModule === 'core' || enabled.has(clientModule)
 }

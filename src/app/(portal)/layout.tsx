@@ -5,6 +5,7 @@ import { Header } from '@/components/layout/header'
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar'
 import { Toaster } from 'sonner'
 import { redirect } from 'next/navigation'
+import { getEnabledClientModules } from '@/lib/client-release/modules'
 
 export default async function PortalLayout({
   children,
@@ -19,7 +20,10 @@ export default async function PortalLayout({
   }
 
   return (
-    <AuthProvider initialProfile={profile}>
+    <AuthProvider
+      initialProfile={profile}
+      enabledModules={[...getEnabledClientModules()]}
+    >
       <SidebarProvider>
         <AppSidebar />
         <SidebarInset>
