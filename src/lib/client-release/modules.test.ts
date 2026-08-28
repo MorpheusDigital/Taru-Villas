@@ -46,9 +46,11 @@ describe('Client module policy', () => {
     expect(moduleForPath('/admin/allowed-emails')).toBe('allowed-emails')
     expect(moduleForPath('/api/admin/allowed-emails')).toBe('allowed-emails')
     expect(moduleForPath('/api/auth/check-whitelist')).toBe('allowed-emails')
+    expect(moduleForPath('/api/auth/provision')).toBe('allowed-emails')
     expect(isPathEnabled('/admin/allowed-emails', clientOneModules)).toBe(false)
     expect(isPathEnabled('/api/admin/allowed-emails', clientOneModules)).toBe(false)
     expect(isPathEnabled('/api/auth/check-whitelist', clientOneModules)).toBe(false)
+    expect(isPathEnabled('/api/auth/provision', clientOneModules)).toBe(false)
     expect(isPathEnabled('/admin/allowed-emails', legacyModules)).toBe(true)
   })
 

@@ -61,6 +61,7 @@ const moduleRoutes: readonly [string, ClientModule][] = [
   ['/admin/allowed-emails', 'allowed-emails'],
   ['/api/admin/allowed-emails', 'allowed-emails'],
   ['/api/auth/check-whitelist', 'allowed-emails'],
+  ['/api/auth/provision', 'allowed-emails'],
   ['/admin/users', 'core'],
   ['/api/users', 'core'],
   ['/admin/properties', 'core'],
