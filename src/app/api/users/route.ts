@@ -1,26 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
 import { getProfile } from '@/lib/auth/guards'
+import { parseInviteUser } from '@/lib/auth/invitations'
 import { getProfiles, createProfile, getProfileByEmail } from '@/lib/db/queries/profiles'
+import { getProperties } from '@/lib/db/queries/properties'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { db } from '@/lib/db'
 import { propertyAssignments } from '@/lib/db/schema'
-
-// ---------------------------------------------------------------------------
-// Validation
-// ---------------------------------------------------------------------------
-
-const inviteUserSchema = z.object({
-  email: z
-    .string()
-    .email('Must be a valid email')
-    .refine((email) => email.endsWith('@taruvillas.com'), {
-      message: 'Email must be a @taruvillas.com address',
-    }),
-  fullName: z.string().min(1, 'Full name is required').max(255),
-  role: z.enum(['admin', 'property_manager', 'staff']),
-  propertyIds: z.array(z.string().uuid('Invalid property ID')).default([]),
-})
 
 // ---------------------------------------------------------------------------
 // GET /api/users
@@ -69,7 +54,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const parsed = inviteUserSchema.safeParse(body)
+    const parsed = parseInviteUser(body)
     if (!parsed.success) {
       return NextResponse.json(
         { error: 'Validation failed', details: parsed.error.flatten().fieldErrors },
@@ -78,6 +63,17 @@ export async function POST(request: NextRequest) {
     }
 
     const { email, fullName, role, propertyIds } = parsed.data
+    const organizationProperties = await getProperties(profile.orgId)
+    const organizationPropertyIds = new Set(
+      organizationProperties.map((property) => property.id)
+    )
+
+    if (propertyIds.some((propertyId) => !organizationPropertyIds.has(propertyId))) {
+      return NextResponse.json(
+        { error: 'Forbidden: property does not belong to your organization' },
+        { status: 403 }
+      )
+    }
 
     // Check if user already exists
     const existingProfile = await getProfileByEmail(email)
