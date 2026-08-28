@@ -12,3 +12,11 @@ export function shouldRejectUninvitedUser(
 ): boolean {
   return inviteOnly && !hasExistingProfile
 }
+
+export function isInviteOnlyLaunchReady(
+  inviteOnlyValue = process.env.CLIENT_INVITE_ONLY,
+  publicSignupsDisabledValue = process.env.CLIENT_SUPABASE_PUBLIC_SIGNUPS_DISABLED
+): boolean {
+  return !isInviteOnlyClient(inviteOnlyValue)
+    || publicSignupsDisabledValue?.trim().toLowerCase() === 'true'
+}

@@ -15,6 +15,7 @@ Client 1 is invite-only. Set the following in its deployment environment:
 
 ```bash
 CLIENT_INVITE_ONLY=true
+CLIENT_SUPABASE_PUBLIC_SIGNUPS_DISABLED=true
 ```
 
 Before launch, disable public sign-ups in the dedicated Client 1 Supabase
@@ -22,6 +23,8 @@ project. This is required because the Supabase anonymous key is available to
 the browser; hiding the application sign-up control alone cannot prevent direct
 calls to Supabase Auth. Invite users through the portal after creating the
 initial administrator through the trusted deployment/bootstrap process.
+The app fails closed with HTTP 503 until
+`CLIENT_SUPABASE_PUBLIC_SIGNUPS_DISABLED=true` is explicitly set.
 
 Leave `CLIENT_INVITE_ONLY` unset only for the legacy internal environment,
 which retains its self-service onboarding flow.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   canAutoProvisionUser,
+  isInviteOnlyLaunchReady,
   isInviteOnlyClient,
   shouldRejectUninvitedUser,
 } from './client-access'
@@ -20,5 +21,11 @@ describe('client access policy', () => {
     expect(shouldRejectUninvitedUser(true, false)).toBe(true)
     expect(shouldRejectUninvitedUser(true, true)).toBe(false)
     expect(shouldRejectUninvitedUser(false, false)).toBe(false)
+  })
+
+  it('fails closed when an invite-only deployment has not confirmed disabled Supabase sign-ups', () => {
+    expect(isInviteOnlyLaunchReady('true', undefined)).toBe(false)
+    expect(isInviteOnlyLaunchReady('true', 'true')).toBe(true)
+    expect(isInviteOnlyLaunchReady(undefined, undefined)).toBe(true)
   })
 })
