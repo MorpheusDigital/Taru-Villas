@@ -40,8 +40,29 @@ range before deciding the spike.
 
 ## Adapter decision
 
-Pending. Run `npx vinext check` first. Use vinext only with no P0 blockers;
-otherwise record the blocker and evaluate OpenNext. The final status must be
-exactly `READY_FOR_PRODUCTION_PLAN` only after every P0 row passes with no
-runtime compatibility error and no production secret. Otherwise it is
-`BLOCKED`.
+`npx vinext check` ran on `2026-08-30T05:35:19Z` with vinext
+`1.0.0-beta.8`. It reported 93% compatibility: the project needs ESM mode and
+`next/font/google` is partial because fonts load from a CDN. The later
+initializer was a hard blocker: npm could not resolve vinext's Vite 8 React
+plugin dependency graph with this repository's Babel 7 `shadcn` toolchain. The
+conflict was reproducible as `ERESOLVE` between `@babel/core@7.29.0` and the
+Babel 8 peer brought by `@vitejs/plugin-react@6.1.1`.
+
+No forced or legacy peer-resolution was used. The partial vinext-generated
+files were discarded. The selected fallback is OpenNext `1.18.0`, pinned
+because it explicitly supports Next.js `^16.1.5`; the current OpenNext release
+requires Next.js `>=16.3.3` and is not compatible with this app's `16.1.6`.
+
+| Adapter | Version | Build command | Result | Timestamp |
+| --- | --- | --- | --- | --- |
+| vinext | 1.0.0-beta.8 | `npx vinext check` | Blocked by dependency resolution; no preview artifact | 2026-08-30T05:35:19Z |
+| OpenNext Cloudflare | 1.18.0 | `npm run build:cloudflare` | Passed; emitted `.open-next/worker.js` locally | 2026-08-30T05:39:11Z |
+
+OpenNext uses Wrangler `4.127.1`, `nodejs_compat`, compatibility date
+`2026-08-30`, static assets at `.open-next/assets`, and observability. Its
+only configured Worker name is `taru-client1-preview`; there is no route,
+custom domain, or production environment in this configuration.
+
+The final status must be exactly `READY_FOR_PRODUCTION_PLAN` only after every
+P0 row passes with no runtime compatibility error and no production secret.
+Otherwise it is `BLOCKED`.
