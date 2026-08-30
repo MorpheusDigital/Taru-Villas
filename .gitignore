@@ -50,3 +50,6 @@ next-env.d.ts
 
 # OpenNext generated Worker output
 .open-next/
+
+# Wrangler local runtime state
+.wrangler/
