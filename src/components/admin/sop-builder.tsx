@@ -2,7 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useForm, useFieldArray } from 'react-hook-form'
+import {
+  useForm,
+  useFieldArray,
+  type Control,
+  type FieldErrors,
+  type UseFormRegister,
+} from 'react-hook-form'
 import { z } from 'zod/v4'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
@@ -456,9 +462,9 @@ function SectionCard({
   onRemove,
 }: {
   sectionIndex: number
-  control: any
-  register: any
-  errors: any
+  control: Control<FormValues>
+  register: UseFormRegister<FormValues>
+  errors: FieldErrors<FormValues>
   collapsed: boolean
   onToggle: () => void
   onRemove: () => void

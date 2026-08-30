@@ -1,11 +1,20 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
-import { getEnabledClientModules, isPathEnabled } from '@/lib/client-release/modules'
-import { isInviteOnlyLaunchReady } from '@/lib/auth/client-access'
+import { getClientModuleRequestStatus } from '@/lib/client-release/modules'
+import { isInviteOnlyClient, isInviteOnlyLaunchReady } from '@/lib/auth/client-access'
 
 export async function middleware(request: NextRequest) {
   if (!isInviteOnlyLaunchReady()) {
     return new NextResponse('Client access is not configured', { status: 503 })
+  }
+
+  const moduleRequestStatus = getClientModuleRequestStatus(
+    request.nextUrl.pathname,
+    process.env.CLIENT_ENABLED_MODULES,
+    isInviteOnlyClient()
+  )
+  if (moduleRequestStatus === 503) {
+    return new NextResponse('Client modules are not configured', { status: 503 })
   }
 
   // --- DEV BYPASS: skip all auth checks for testing ---
@@ -13,8 +22,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  const enabledModules = getEnabledClientModules()
-  if (enabledModules.size > 0 && !isPathEnabled(request.nextUrl.pathname, enabledModules)) {
+  if (moduleRequestStatus === 404) {
     return new NextResponse('Not Found', { status: 404 })
   }
 

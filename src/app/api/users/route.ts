@@ -9,6 +9,7 @@ import { getProperties } from '@/lib/db/queries/properties'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { db } from '@/lib/db'
 import { profiles, propertyAssignments } from '@/lib/db/schema'
+import { getApplicationOrigin } from '@/lib/auth/callback'
 
 // ---------------------------------------------------------------------------
 // GET /api/users
@@ -66,6 +67,7 @@ export async function POST(request: NextRequest) {
     }
 
     const supabaseAdmin = createAdminClient()
+    const redirectTo = new URL('/callback', getApplicationOrigin()).toString()
     const result = await inviteUserForOrganization(profile, parsed.data, {
       getOrganizationPropertyIds: async (orgId) => {
         const organizationProperties = await getProperties(orgId)
@@ -75,7 +77,14 @@ export async function POST(request: NextRequest) {
       inviteUserByEmail: async ({ email, fullName, role }) => {
         const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(
           email,
-          { data: { full_name: fullName, role } }
+          {
+            data: {
+              full_name: fullName,
+              role,
+              organization_id: profile.orgId,
+            },
+            redirectTo,
+          }
         )
         if (error) throw error
         return { id: data.user.id }

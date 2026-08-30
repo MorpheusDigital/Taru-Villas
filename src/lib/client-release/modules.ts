@@ -33,6 +33,11 @@ const clientModules: readonly ClientModule[] = [
   'core',
 ]
 
+export type ClientModulePolicy =
+  | { status: 'legacy-unrestricted'; enabledModules: Set<ClientModule> }
+  | { status: 'configured'; enabledModules: Set<ClientModule> }
+  | { status: 'configuration-error'; enabledModules: Set<ClientModule> }
+
 const nestedPropertyRoutes: readonly [RegExp, ClientModule][] = [
   [/^\/properties\/[^/]+\/daily-records(?:\/|$)/, 'daily-records'],
   [/^\/properties\/[^/]+\/(?:utilities|waste)(?:\/|$)/, 'daily-records'],
@@ -100,6 +105,50 @@ export function getEnabledClientModules(value?: string): Set<ClientModule> {
   const configuredModules = new Set((value ?? process.env.CLIENT_ENABLED_MODULES ?? '').split(',').map((module) => module.trim()))
 
   return new Set(clientModules.filter((module) => configuredModules.has(module)))
+}
+
+export function getClientModulePolicy(
+  value = process.env.CLIENT_ENABLED_MODULES,
+  inviteOnly = false
+): ClientModulePolicy {
+  const configuredValues = value
+    ?.split(',')
+    .map((module) => module.trim())
+    .filter(Boolean) ?? []
+  const enabledModules = getEnabledClientModules(value)
+  const invalidValues = configuredValues.filter(
+    (module) => !clientModules.includes(module as ClientModule)
+  )
+
+  if (inviteOnly && (
+    configuredValues.length === 0
+    || enabledModules.size === 0
+    || invalidValues.length > 0
+  )) {
+    return { status: 'configuration-error', enabledModules: new Set() }
+  }
+
+  if (enabledModules.size === 0) {
+    return { status: 'legacy-unrestricted', enabledModules }
+  }
+
+  return { status: 'configured', enabledModules }
+}
+
+export function getClientModuleRequestStatus(
+  pathname: string,
+  value = process.env.CLIENT_ENABLED_MODULES,
+  inviteOnly = false
+): 404 | 503 | null {
+  const policy = getClientModulePolicy(value, inviteOnly)
+  if (policy.status === 'configuration-error') return 503
+  if (
+    policy.status === 'configured'
+    && !isPathEnabled(pathname, policy.enabledModules)
+  ) {
+    return 404
+  }
+  return null
 }
 
 export function moduleForPath(pathname: string): ClientModule | undefined {
