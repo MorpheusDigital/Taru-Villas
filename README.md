@@ -29,6 +29,23 @@ The app fails closed with HTTP 503 until
 Leave `CLIENT_INVITE_ONLY` unset only for the legacy internal environment,
 which retains its self-service onboarding flow.
 
+## Client 1 PWA
+
+The authenticated portal is installable as an online-first Progressive Web App.
+Set this client branding at build time, then rebuild the deployment:
+
+```bash
+NEXT_PUBLIC_APP_NAME=Taru Villas Management Portal
+NEXT_PUBLIC_APP_SHORT_NAME=Taru Villas
+NEXT_PUBLIC_THEME_COLOR=#1f5138
+```
+
+The PWA caches only static application assets. Portal data, API responses,
+forms, photos, uploads, and offline queues are intentionally excluded from
+this first release. Follow
+[the device acceptance runbook](docs/runbooks/client-pwa-acceptance.md) before
+cutting over `portal.taruvillas.com`.
+
 ## Getting Started
 
 First, run the development server:
