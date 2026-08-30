@@ -9,7 +9,10 @@ self.addEventListener('activate', (event) => {
     caches.keys().then(async (cacheNames) => {
       await Promise.all(
         cacheNames
-          .filter((cacheName) => cacheName !== CACHE_NAME)
+          .filter(
+            (cacheName) =>
+              cacheName.startsWith('taru-static-') && cacheName !== CACHE_NAME,
+          )
           .map((cacheName) => caches.delete(cacheName)),
       )
       await self.clients.claim()
@@ -37,14 +40,25 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      const cachedResponse = await cache.match(event.request)
-      if (cachedResponse) return cachedResponse
+    (async () => {
+      try {
+        const cache = await caches.open(CACHE_NAME)
+        const cachedResponse = await cache.match(event.request)
+        if (cachedResponse) return cachedResponse
 
-      const response = await fetch(event.request)
-      if (response.ok) await cache.put(event.request, response.clone())
-      return response
-    }),
+        const response = await fetch(event.request)
+        if (response.ok) {
+          try {
+            await cache.put(event.request, response.clone())
+          } catch {
+            // Caching is an optimization; the online response still succeeds.
+          }
+        }
+        return response
+      } catch {
+        return fetch(event.request)
+      }
+    })(),
   )
 })
 

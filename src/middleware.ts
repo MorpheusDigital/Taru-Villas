@@ -60,6 +60,7 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname.startsWith('/api/utilities/extract-reading') ||
     request.nextUrl.pathname.startsWith('/api/fleet/driver/') ||
     request.nextUrl.pathname.startsWith('/api/cron/') ||
+    request.nextUrl.pathname === '/manifest.webmanifest' ||
     request.nextUrl.pathname === '/sw.js'
 
   if (isPublicRoute) return supabaseResponse
