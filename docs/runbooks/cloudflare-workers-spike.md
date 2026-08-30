@@ -63,6 +63,40 @@ OpenNext uses Wrangler `4.127.1`, `nodejs_compat`, compatibility date
 only configured Worker name is `taru-client1-preview`; there is no route,
 custom domain, or production environment in this configuration.
 
+## Hyperdrive runtime wiring
+
+`src/lib/db/index.ts` resolves the database lazily when an existing synchronous
+`db` call is made. In a Worker request it reads
+`getCloudflareContext().env.HYPERDRIVE.connectionString` and reuses one
+Postgres.js/Drizzle client for that request context. Outside Workers it retains
+the existing `POSTGRES_URL`, then `DATABASE_URL`, fallback. A Worker context
+without a valid `HYPERDRIVE` binding fails closed instead of connecting
+directly to the origin database.
+
+The checked-in `wrangler.jsonc` intentionally has no placeholder Hyperdrive
+ID. After the dedicated synthetic preview Hyperdrive is provisioned, add only
+its real ID and regenerate binding types before building or deploying:
+
+```jsonc
+"hyperdrive": [
+  {
+    "binding": "HYPERDRIVE",
+    "id": "<PREVIEW_HYPERDRIVE_ID>"
+  }
+]
+```
+
+```bash
+WRANGLER_LOG_PATH=/tmp/taru-preview-wrangler.log \
+  npx wrangler types cloudflare-env.d.ts --env-interface CloudflareEnv
+```
+
+Do not use a production Hyperdrive ID, database, credentials, or dataset. The
+runtime adapter is covered by focused unit tests, but the P0 Drizzle query and
+transaction row remains unverified until the real preview binding is available.
+Database RLS or an equivalent hardening strategy is also still an unresolved
+production blocker.
+
 The final status must be exactly `READY_FOR_PRODUCTION_PLAN` only after every
 P0 row passes with no runtime compatibility error and no production secret.
 Otherwise it is `BLOCKED`.
