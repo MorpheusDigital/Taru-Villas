@@ -185,11 +185,10 @@ export function PropertyDashboard({
 }: PropertyDashboardProps) {
   const router = useRouter()
   const [, setDateRange] = useState<{ from: Date; to: Date }>(() => {
-    const now = new Date()
-    return {
-      from: new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000),
-      to: now,
-    }
+    const to = new Date()
+    const from = new Date(to)
+    from.setDate(from.getDate() - 180)
+    return { from, to }
   })
 
   const handleDateChange = useCallback(

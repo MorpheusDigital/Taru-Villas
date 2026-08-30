@@ -6,6 +6,13 @@ import {
   createCategory,
 } from '@/lib/db/queries/categories'
 
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === '23505'
+}
+
 export async function GET() {
   try {
     const profile = await getProfile()
@@ -39,12 +46,12 @@ export async function POST(request: NextRequest) {
     try {
       const category = await createCategory({ orgId: profile.orgId, name: parsed.data.name.trim() })
       return NextResponse.json(category, { status: 201 })
-    } catch (e: unknown) {
+    } catch (error: unknown) {
       // Postgres unique violation
-      if (e && typeof e === 'object' && 'code' in e && e.code === '23505') {
+      if (isUniqueViolation(error)) {
         return NextResponse.json({ error: 'A category with that name already exists' }, { status: 409 })
       }
-      throw e
+      throw error
     }
   } catch (error) {
     console.error('POST /api/sops/categories error:', error)

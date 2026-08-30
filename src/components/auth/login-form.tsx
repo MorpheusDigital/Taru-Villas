@@ -11,6 +11,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   inactive: 'Your account has been deactivated. Please contact your administrator.',
   auth_failed: 'Authentication failed. Please try again.',
   no_profile: 'No account found. Please contact your administrator to get access.',
+  invite_invalid: 'This invitation is invalid or has expired. Ask your administrator for a new invitation.',
   not_whitelisted: 'This email is not authorized. Contact your administrator for access.',
 }
 

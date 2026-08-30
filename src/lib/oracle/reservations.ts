@@ -23,27 +23,28 @@ function asString(v: unknown): string | null {
   return typeof v === 'string' && v.length > 0 ? v : null
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null
     ? value as Record<string, unknown>
-    : null
+    : {}
 }
 
 /** Normalize one reservation object from getHotelReservations / getReservation. */
 export function normalizeArrival(raw: unknown): NormalizedArrival {
   const root = asRecord(raw)
-  const r = asRecord(root?.reservation) ?? root ?? {}
-  const ids = r.reservationIdList ?? r.resvNameId
+  const r = asRecord(root.reservation ?? raw)
+  const ids = r.reservationIdList ?? r.resvNameId ?? []
+  const firstId = Array.isArray(ids) ? asRecord(ids[0]).id : asRecord(ids).id
   const oracleReservationId =
-    asString(Array.isArray(ids) ? asRecord(ids[0])?.id : asRecord(ids)?.id) ??
+    asString(firstId) ??
     asString(r.reservationId) ??
     asString(r.id) ??
     ''
-  const profile = asRecord(r.reservationGuest) ?? asRecord(r.guestProfile) ?? asRecord(r.profile) ?? {}
+  const profile = asRecord(r.reservationGuest ?? r.guestProfile ?? r.profile)
   const name = profile.givenName || profile.surname
     ? `${asString(profile.givenName) ?? ''} ${asString(profile.surname) ?? ''}`.trim()
     : asString(profile.fullName)
-  const roomStay = asRecord(r.roomStay) ?? {}
+  const roomStay = asRecord(r.roomStay)
   return {
     oracleReservationId,
     confirmationNumber: asString(r.confirmationNumber) ?? asString(r.confirmationNo),
@@ -59,9 +60,9 @@ export function normalizeArrival(raw: unknown): NormalizedArrival {
 export function normalizeReservation(raw: unknown): NormalizedReservation {
   const base = normalizeArrival(raw)
   const root = asRecord(raw)
-  const r = asRecord(root?.reservation) ?? root ?? {}
-  const roomStay = asRecord(r.roomStay) ?? {}
-  const currentRoomInfo = asRecord(roomStay.currentRoomInfo) ?? {}
+  const r = asRecord(root.reservation ?? raw)
+  const roomStay = asRecord(r.roomStay)
+  const currentRoomInfo = asRecord(roomStay.currentRoomInfo)
   const status =
     asString(r.reservationStatus) ??
     asString(r.computedReservationStatus) ??

@@ -5,6 +5,16 @@ import { normalizeArrival, normalizeReservation } from './reservations'
 interface Cached { token: string; expiresAt: number }
 let cached: Cached | null = null
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
+}
+
 function env() {
   const gateway = process.env.ORACLE_OHIP_GATEWAY
   const clientId = process.env.ORACLE_OHIP_CLIENT_ID
@@ -91,17 +101,14 @@ export async function listArrivals(
   })
   if (!res.ok) return res
   // PIN: the array key under the envelope is confirmed against the sandbox.
-  const envelope = res.data && typeof res.data === 'object' && !Array.isArray(res.data)
-    ? res.data as Record<string, unknown>
-    : {}
-  const reservations = envelope.reservations && typeof envelope.reservations === 'object' && !Array.isArray(envelope.reservations)
-    ? envelope.reservations as Record<string, unknown>
-    : {}
-  const list = [
-    reservations.reservation,
-    envelope.reservations,
-    envelope.hotelReservations,
-  ].find(Array.isArray) ?? []
+  const data = asRecord(res.data)
+  const reservations = data.reservations
+  const reservationEnvelope = asRecord(reservations)
+  const list = asArray(
+    reservationEnvelope.reservation
+    ?? reservations
+    ?? data.hotelReservations
+  )
   return { ok: true, data: list.map(normalizeArrival).filter((a) => a.oracleReservationId) }
 }
 

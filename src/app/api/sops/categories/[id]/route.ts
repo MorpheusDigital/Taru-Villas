@@ -10,6 +10,13 @@ import {
 
 const renameSchema = z.object({ name: z.string().min(1).max(80) })
 
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === '23505'
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -35,11 +42,11 @@ export async function PATCH(
     try {
       const updated = await updateCategory(id, { name: parsed.data.name.trim() })
       return NextResponse.json(updated)
-    } catch (e: unknown) {
-      if (e && typeof e === 'object' && 'code' in e && e.code === '23505') {
+    } catch (error: unknown) {
+      if (isUniqueViolation(error)) {
         return NextResponse.json({ error: 'A category with that name already exists' }, { status: 409 })
       }
-      throw e
+      throw error
     }
   } catch (error) {
     console.error('PATCH /api/sops/categories/[id] error:', error)

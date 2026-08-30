@@ -47,6 +47,13 @@ import type {
   SopDashboardRow,
 } from '@/lib/sops/types'
 
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === '23505'
+}
+
 // ---------------------------------------------------------------------------
 // Helpers: due date computation (server-only, uses date-fns)
 // ---------------------------------------------------------------------------
@@ -725,11 +732,11 @@ export async function batchCreateAssignments(
     try {
       await db.insert(sopAssignments).values(row)
       created++
-    } catch (e: unknown) {
-      if (e && typeof e === 'object' && 'code' in e && e.code === '23505') {
+    } catch (error: unknown) {
+      if (isUniqueViolation(error)) {
         skipped++
       } else {
-        throw e
+        throw error
       }
     }
   }

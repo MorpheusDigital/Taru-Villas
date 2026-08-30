@@ -9,6 +9,11 @@ Set the Client 1 production modules as follows (leave unset only in the legacy i
 CLIENT_ENABLED_MODULES=dashboard,tasks,surveys,fleet
 ```
 
+When `CLIENT_INVITE_ONLY=true`, this setting is mandatory. Missing, empty,
+all-invalid, or partly invalid module lists return HTTP 503 at middleware before
+authentication. An empty setting remains unrestricted only for the legacy
+environment where `CLIENT_INVITE_ONLY` is unset.
+
 ## Client 1 access
 
 Client 1 is invite-only. Set the following in its deployment environment:
@@ -16,6 +21,7 @@ Client 1 is invite-only. Set the following in its deployment environment:
 ```bash
 CLIENT_INVITE_ONLY=true
 CLIENT_SUPABASE_PUBLIC_SIGNUPS_DISABLED=true
+NEXT_PUBLIC_APP_URL=https://portal.client.example
 ```
 
 Before launch, disable public sign-ups in the dedicated Client 1 Supabase
@@ -25,6 +31,32 @@ calls to Supabase Auth. Invite users through the portal after creating the
 initial administrator through the trusted deployment/bootstrap process.
 The app fails closed with HTTP 503 until
 `CLIENT_SUPABASE_PUBLIC_SIGNUPS_DISABLED=true` is explicitly set.
+
+Configure the dedicated Client 1 Supabase project before sending invitations:
+
+1. In **Authentication → URL Configuration**, set the Site URL to
+   `https://portal.client.example` and add
+   `https://portal.client.example/callback` to the allowed redirect URLs.
+2. In **Authentication → Email Templates → Invite user**, make the acceptance
+   link point through the application callback so the server can verify the
+   hashed invite token and establish its SSR cookie session:
+
+   ```html
+   <a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=invite">
+     Accept invitation
+   </a>
+   ```
+
+   The application supplies `.RedirectTo` as the canonical
+   `NEXT_PUBLIC_APP_URL` plus `/callback`; do not hard-code a different host in
+   the template.
+3. Keep public sign-ups disabled. The invited auth user ID must match the
+   profile pre-created by the administrator in the intended organization and
+   role. Invalid, expired, unbound, or email-mismatched invitations are rejected.
+
+After successful token verification, the user is sent to `/set-password`; the
+password update completes against the SSR-authenticated Supabase session and
+then enters the portal at `/dashboard`.
 
 Leave `CLIENT_INVITE_ONLY` unset only for the legacy internal environment,
 which retains its self-service onboarding flow.

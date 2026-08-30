@@ -46,6 +46,19 @@ export async function getPropertyById(id: string): Promise<Property | undefined>
   return results[0]
 }
 
+export async function getPropertyByIdForOrganization(
+  id: string,
+  orgId: string
+): Promise<Property | undefined> {
+  const results = await db
+    .select()
+    .from(properties)
+    .where(and(eq(properties.id, id), eq(properties.orgId, orgId)))
+    .limit(1)
+
+  return results[0]
+}
+
 /**
  * Get all properties a user has access to.
  * Admins see all active properties in their org; others see only assigned properties.
