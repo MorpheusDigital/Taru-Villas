@@ -39,9 +39,9 @@ export async function POST(request: NextRequest) {
     try {
       const category = await createCategory({ orgId: profile.orgId, name: parsed.data.name.trim() })
       return NextResponse.json(category, { status: 201 })
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Postgres unique violation
-      if (e?.code === '23505') {
+      if (e && typeof e === 'object' && 'code' in e && e.code === '23505') {
         return NextResponse.json({ error: 'A category with that name already exists' }, { status: 409 })
       }
       throw e

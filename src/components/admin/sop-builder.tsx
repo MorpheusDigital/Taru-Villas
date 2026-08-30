@@ -456,9 +456,9 @@ function SectionCard({
   onRemove,
 }: {
   sectionIndex: number
-  control: any
-  register: any
-  errors: any
+  control: ReturnType<typeof useForm<FormValues>>['control']
+  register: ReturnType<typeof useForm<FormValues>>['register']
+  errors: ReturnType<typeof useForm<FormValues>>['formState']['errors']
   collapsed: boolean
   onToggle: () => void
   onRemove: () => void

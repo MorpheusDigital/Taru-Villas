@@ -367,7 +367,7 @@ export async function getAssignmentsForUser(
 
   // Get item completions for existing completions
   const completionIds = completions.map((c) => c.id)
-  let itemCompletionsMap = new Map<string, SopItemCompletion[]>()
+  const itemCompletionsMap = new Map<string, SopItemCompletion[]>()
   if (completionIds.length > 0) {
     const itemCompletions = await db
       .select()
@@ -725,8 +725,8 @@ export async function batchCreateAssignments(
     try {
       await db.insert(sopAssignments).values(row)
       created++
-    } catch (e: any) {
-      if (e?.code === '23505') {
+    } catch (e: unknown) {
+      if (e && typeof e === 'object' && 'code' in e && e.code === '23505') {
         skipped++
       } else {
         throw e

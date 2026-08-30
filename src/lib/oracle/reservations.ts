@@ -23,43 +23,52 @@ function asString(v: unknown): string | null {
   return typeof v === 'string' && v.length > 0 ? v : null
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
 /** Normalize one reservation object from getHotelReservations / getReservation. */
-export function normalizeArrival(raw: any): NormalizedArrival {
-  const r = raw?.reservation ?? raw ?? {}
-  const ids = r?.reservationIdList ?? r?.resvNameId ?? []
+export function normalizeArrival(raw: unknown): NormalizedArrival {
+  const root = asRecord(raw)
+  const r = asRecord(root?.reservation) ?? root ?? {}
+  const ids = r.reservationIdList ?? r.resvNameId
   const oracleReservationId =
-    asString(Array.isArray(ids) ? ids?.[0]?.id : ids?.id) ??
-    asString(r?.reservationId) ??
-    asString(r?.id) ??
+    asString(Array.isArray(ids) ? asRecord(ids[0])?.id : asRecord(ids)?.id) ??
+    asString(r.reservationId) ??
+    asString(r.id) ??
     ''
-  const profile = r?.reservationGuest ?? r?.guestProfile ?? r?.profile ?? {}
-  const name = profile?.givenName || profile?.surname
-    ? `${asString(profile?.givenName) ?? ''} ${asString(profile?.surname) ?? ''}`.trim()
-    : asString(profile?.fullName)
-  const roomStay = r?.roomStay ?? {}
+  const profile = asRecord(r.reservationGuest) ?? asRecord(r.guestProfile) ?? asRecord(r.profile) ?? {}
+  const name = profile.givenName || profile.surname
+    ? `${asString(profile.givenName) ?? ''} ${asString(profile.surname) ?? ''}`.trim()
+    : asString(profile.fullName)
+  const roomStay = asRecord(r.roomStay) ?? {}
   return {
     oracleReservationId,
-    confirmationNumber: asString(r?.confirmationNumber) ?? asString(r?.confirmationNo),
+    confirmationNumber: asString(r.confirmationNumber) ?? asString(r.confirmationNo),
     guestName: name || null,
-    guestEmail: asString(profile?.email) ?? asString(profile?.emailAddress),
-    arrivalDate: asString(roomStay?.arrivalDate) ?? asString(r?.arrivalDate),
-    departureDate: asString(roomStay?.departureDate) ?? asString(r?.departureDate),
-    roomType: asString(roomStay?.roomType) ?? asString(roomStay?.roomTypeCharged),
+    guestEmail: asString(profile.email) ?? asString(profile.emailAddress),
+    arrivalDate: asString(roomStay.arrivalDate) ?? asString(r.arrivalDate),
+    departureDate: asString(roomStay.departureDate) ?? asString(r.departureDate),
+    roomType: asString(roomStay.roomType) ?? asString(roomStay.roomTypeCharged),
   }
 }
 
 /** Normalize a full reservation, adding status + assigned room. */
-export function normalizeReservation(raw: any): NormalizedReservation {
+export function normalizeReservation(raw: unknown): NormalizedReservation {
   const base = normalizeArrival(raw)
-  const r = raw?.reservation ?? raw ?? {}
-  const roomStay = r?.roomStay ?? {}
+  const root = asRecord(raw)
+  const r = asRecord(root?.reservation) ?? root ?? {}
+  const roomStay = asRecord(r.roomStay) ?? {}
+  const currentRoomInfo = asRecord(roomStay.currentRoomInfo) ?? {}
   const status =
-    asString(r?.reservationStatus) ??
-    asString(r?.computedReservationStatus) ??
-    asString(roomStay?.reservationStatus)
+    asString(r.reservationStatus) ??
+    asString(r.computedReservationStatus) ??
+    asString(roomStay.reservationStatus)
   const roomNumber =
-    asString(roomStay?.currentRoomInfo?.roomId) ??
-    asString(roomStay?.roomId) ??
-    asString(roomStay?.currentRoomInfo?.roomNumber)
+    asString(currentRoomInfo.roomId) ??
+    asString(roomStay.roomId) ??
+    asString(currentRoomInfo.roomNumber)
   return { ...base, reservationStatus: status, roomNumber }
 }

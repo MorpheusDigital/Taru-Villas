@@ -35,8 +35,8 @@ export async function PATCH(
     try {
       const updated = await updateCategory(id, { name: parsed.data.name.trim() })
       return NextResponse.json(updated)
-    } catch (e: any) {
-      if (e?.code === '23505') {
+    } catch (e: unknown) {
+      if (e && typeof e === 'object' && 'code' in e && e.code === '23505') {
         return NextResponse.json({ error: 'A category with that name already exists' }, { status: 409 })
       }
       throw e

@@ -86,16 +86,22 @@ export async function listArrivals(
     limit: String(opts.limit ?? 200),
     offset: String(opts.offset ?? 0),
   })
-  const res = await ohipRequest<any>(`/rsv/v1/hotels/${hotelId}/reservations?${qs}`, {
+  const res = await ohipRequest<unknown>(`/rsv/v1/hotels/${hotelId}/reservations?${qs}`, {
     method: 'GET',
   })
   if (!res.ok) return res
   // PIN: the array key under the envelope is confirmed against the sandbox.
-  const list: any[] =
-    res.data?.reservations?.reservation ??
-    res.data?.reservations ??
-    res.data?.hotelReservations ??
-    []
+  const envelope = res.data && typeof res.data === 'object' && !Array.isArray(res.data)
+    ? res.data as Record<string, unknown>
+    : {}
+  const reservations = envelope.reservations && typeof envelope.reservations === 'object' && !Array.isArray(envelope.reservations)
+    ? envelope.reservations as Record<string, unknown>
+    : {}
+  const list = [
+    reservations.reservation,
+    envelope.reservations,
+    envelope.hotelReservations,
+  ].find(Array.isArray) ?? []
   return { ok: true, data: list.map(normalizeArrival).filter((a) => a.oracleReservationId) }
 }
 
@@ -104,7 +110,7 @@ export async function getReservation(
   hotelId: string,
   reservationId: string
 ): Promise<OhipResult<NormalizedReservation>> {
-  const res = await ohipRequest<any>(
+  const res = await ohipRequest<unknown>(
     `/rsv/v1/hotels/${hotelId}/reservations/${reservationId}`,
     { method: 'GET' }
   )
@@ -121,14 +127,14 @@ export async function postPreArrival(
   reservationId: string,
   _payload: { eta: string | null; comment: string }
 ): Promise<OhipResult<true>> {
-  const current = await ohipRequest<any>(
+  const current = await ohipRequest<unknown>(
     `/rsv/v1/hotels/${hotelId}/reservations/${reservationId}`,
     { method: 'GET' }
   )
   if (!current.ok) return current
   const body = current.data
   // PIN: merge comment + ETA into the reservation body per the sandbox shape.
-  const put = await ohipRequest<any>(
+  const put = await ohipRequest<unknown>(
     `/rsv/v1/hotels/${hotelId}/reservations/${reservationId}`,
     { method: 'PUT', body: JSON.stringify(body) }
   )

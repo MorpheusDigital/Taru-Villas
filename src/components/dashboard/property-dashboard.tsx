@@ -184,9 +184,12 @@ export function PropertyDashboard({
   surveyType,
 }: PropertyDashboardProps) {
   const router = useRouter()
-  const [, setDateRange] = useState<{ from: Date; to: Date }>({
-    from: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000),
-    to: new Date(),
+  const [, setDateRange] = useState<{ from: Date; to: Date }>(() => {
+    const now = new Date()
+    return {
+      from: new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000),
+      to: now,
+    }
   })
 
   const handleDateChange = useCallback(
