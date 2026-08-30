@@ -10,10 +10,12 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import type { User } from '@supabase/supabase-js'
 import type { ProfileWithAssignments } from '@/lib/auth/guards'
+import type { ClientModule } from '@/lib/client-release/modules'
 
 interface AuthContextValue {
   user: User | null
   profile: ProfileWithAssignments
+  enabledModules: readonly ClientModule[]
   loading: boolean
 }
 
@@ -21,9 +23,11 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({
   initialProfile,
+  enabledModules,
   children,
 }: {
   initialProfile: ProfileWithAssignments
+  enabledModules: readonly ClientModule[]
   children: ReactNode
 }) {
   const [user, setUser] = useState<User | null>(null)
@@ -47,7 +51,7 @@ export function AuthProvider({
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, profile: initialProfile, loading }}>
+    <AuthContext.Provider value={{ user, profile: initialProfile, enabledModules, loading }}>
       {children}
     </AuthContext.Provider>
   )

@@ -25,6 +25,7 @@ import {
 import { useAuth } from '@/components/providers/auth-provider'
 import { getFleetNavigationItems } from '@/lib/fleet/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { isPathEnabled, type ClientModule } from '@/lib/client-release/modules'
 
 import {
   Sidebar,
@@ -60,30 +61,31 @@ interface NavItem {
   title: string
   href: string
   icon: React.ComponentType<{ className?: string }>
+  module: ClientModule
 }
 
 const mainNavItems: NavItem[] = [
-  { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { title: 'Surveys', href: '/surveys', icon: ClipboardCheck },
-  { title: 'Task Manager', href: '/tasks', icon: ListTodo },
-  { title: 'My Roster', href: '/my-roster', icon: CalendarDays },
-  { title: 'Rostering', href: '/rostering', icon: CalendarClock },
-  { title: 'SOPs', href: '/sops', icon: ListChecks },
-  { title: 'Daily Records', href: '/daily-records', icon: ClipboardList },
-  { title: 'Asset Registry', href: '/assets', icon: Package },
-  { title: 'Settings', href: '/settings', icon: Settings },
+  { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, module: 'dashboard' },
+  { title: 'Surveys', href: '/surveys', icon: ClipboardCheck, module: 'surveys' },
+  { title: 'Task Manager', href: '/tasks', icon: ListTodo, module: 'tasks' },
+  { title: 'My Roster', href: '/my-roster', icon: CalendarDays, module: 'rostering' },
+  { title: 'Rostering', href: '/rostering', icon: CalendarClock, module: 'rostering' },
+  { title: 'SOPs', href: '/sops', icon: ListChecks, module: 'sops' },
+  { title: 'Daily Records', href: '/daily-records', icon: ClipboardList, module: 'daily-records' },
+  { title: 'Asset Registry', href: '/assets', icon: Package, module: 'assets' },
+  { title: 'Settings', href: '/settings', icon: Settings, module: 'settings' },
 ]
 
 const propertyNavItems: NavItem[] = [
-  { title: 'Excursions', href: '/excursions', icon: Compass },
-  { title: 'Menus', href: '/menus', icon: UtensilsCrossed },
-  { title: 'Guest Profiles', href: '/guest-profiles', icon: UserCheck },
+  { title: 'Excursions', href: '/excursions', icon: Compass, module: 'excursions' },
+  { title: 'Menus', href: '/menus', icon: UtensilsCrossed, module: 'menus' },
+  { title: 'Guest Profiles', href: '/guest-profiles', icon: UserCheck, module: 'guest-profiles' },
 ]
 
 const adminNavItems: NavItem[] = [
-  { title: 'Property Settings', href: '/admin/properties', icon: Building2 },
-  { title: 'Users', href: '/admin/users', icon: Users },
-  { title: 'Allowed Emails', href: '/admin/allowed-emails', icon: ShieldCheck },
+  { title: 'Property Settings', href: '/admin/properties', icon: Building2, module: 'core' },
+  { title: 'Users', href: '/admin/users', icon: Users, module: 'core' },
+  { title: 'Allowed Emails', href: '/admin/allowed-emails', icon: ShieldCheck, module: 'allowed-emails' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -114,7 +116,7 @@ function formatRole(role: string): string {
 export function AppSidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const { profile } = useAuth()
+  const { profile, enabledModules } = useAuth()
   const { setOpenMobile } = useSidebar()
 
   const isActive = (href: string) => {
@@ -142,13 +144,23 @@ export function AppSidebar() {
 
   const isFleetAdmin = profile.isFleetAdmin || profile.role === 'admin'
   const canSeeFleet = profile.canBookFleet || isFleetAdmin
-  const fleetNavItems = getFleetNavigationItems(canSeeFleet, isFleetAdmin)
+  const enabledSet = new Set(enabledModules)
+  const fleetNavItems = isPathEnabled('/fleet', enabledSet)
+    ? getFleetNavigationItems(canSeeFleet, isFleetAdmin)
+    : []
 
   const visibleMainNavItems = mainNavItems.filter((item) => {
+    if (!isPathEnabled(item.href, enabledSet)) return false
     if (item.href === '/dashboard') return showAdminSection
     if (item.href === '/rostering') return showPropertySection
     return true
   })
+  const visiblePropertyNavItems = propertyNavItems.filter(
+    (item) => isPathEnabled(item.href, enabledSet)
+  )
+  const visibleAdminNavItems = adminNavItems.filter(
+    (item) => isPathEnabled(item.href, enabledSet)
+  )
 
   return (
     <Sidebar collapsible="icon">
@@ -229,7 +241,7 @@ export function AppSidebar() {
             <SidebarGroupLabel>Property Content</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {propertyNavItems.map((item) => (
+                {visiblePropertyNavItems.map((item) => (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton
                       asChild
@@ -255,7 +267,7 @@ export function AppSidebar() {
             <SidebarGroupLabel>Setup & Permissions</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {adminNavItems.map((item) => (
+                {visibleAdminNavItems.map((item) => (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton
                       asChild

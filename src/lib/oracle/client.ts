@@ -5,6 +5,16 @@ import { normalizeArrival, normalizeReservation } from './reservations'
 interface Cached { token: string; expiresAt: number }
 let cached: Cached | null = null
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
+}
+
 function env() {
   const gateway = process.env.ORACLE_OHIP_GATEWAY
   const clientId = process.env.ORACLE_OHIP_CLIENT_ID
@@ -86,16 +96,19 @@ export async function listArrivals(
     limit: String(opts.limit ?? 200),
     offset: String(opts.offset ?? 0),
   })
-  const res = await ohipRequest<any>(`/rsv/v1/hotels/${hotelId}/reservations?${qs}`, {
+  const res = await ohipRequest<unknown>(`/rsv/v1/hotels/${hotelId}/reservations?${qs}`, {
     method: 'GET',
   })
   if (!res.ok) return res
   // PIN: the array key under the envelope is confirmed against the sandbox.
-  const list: any[] =
-    res.data?.reservations?.reservation ??
-    res.data?.reservations ??
-    res.data?.hotelReservations ??
-    []
+  const data = asRecord(res.data)
+  const reservations = data.reservations
+  const reservationEnvelope = asRecord(reservations)
+  const list = asArray(
+    reservationEnvelope.reservation
+    ?? reservations
+    ?? data.hotelReservations
+  )
   return { ok: true, data: list.map(normalizeArrival).filter((a) => a.oracleReservationId) }
 }
 
@@ -104,7 +117,7 @@ export async function getReservation(
   hotelId: string,
   reservationId: string
 ): Promise<OhipResult<NormalizedReservation>> {
-  const res = await ohipRequest<any>(
+  const res = await ohipRequest<unknown>(
     `/rsv/v1/hotels/${hotelId}/reservations/${reservationId}`,
     { method: 'GET' }
   )
@@ -121,14 +134,14 @@ export async function postPreArrival(
   reservationId: string,
   _payload: { eta: string | null; comment: string }
 ): Promise<OhipResult<true>> {
-  const current = await ohipRequest<any>(
+  const current = await ohipRequest<unknown>(
     `/rsv/v1/hotels/${hotelId}/reservations/${reservationId}`,
     { method: 'GET' }
   )
   if (!current.ok) return current
   const body = current.data
   // PIN: merge comment + ETA into the reservation body per the sandbox shape.
-  const put = await ohipRequest<any>(
+  const put = await ohipRequest<unknown>(
     `/rsv/v1/hotels/${hotelId}/reservations/${reservationId}`,
     { method: 'PUT', body: JSON.stringify(body) }
   )

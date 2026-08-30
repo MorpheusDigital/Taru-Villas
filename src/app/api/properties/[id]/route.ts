@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { getProfile, getUserProperties } from '@/lib/auth/guards'
 import {
-  getPropertyById,
-  updateProperty,
-  deleteProperty,
+  getPropertyByIdForOrganization,
 } from '@/lib/db/queries/properties'
 import { db } from '@/lib/db'
-import { propertyAssignments } from '@/lib/db/schema'
+import {
+  profiles,
+  properties,
+  propertyAssignments,
+  surveySubmissions,
+} from '@/lib/db/schema'
+import {
+  belongsToOrganization,
+  referencesBelongToOrganization,
+} from '@/lib/auth/organization-scope'
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -64,7 +71,7 @@ export async function GET(
       return NextResponse.json({ error: 'Forbidden: no access to this property' }, { status: 403 })
     }
 
-    const property = await getPropertyById(id)
+    const property = await getPropertyByIdForOrganization(id, profile.orgId)
     if (!property) {
       return NextResponse.json({ error: 'Property not found' }, { status: 404 })
     }
@@ -100,8 +107,8 @@ export async function PATCH(
       return NextResponse.json({ error: 'Forbidden: admin access required' }, { status: 403 })
     }
 
-    const existing = await getPropertyById(id)
-    if (!existing) {
+    const existing = await getPropertyByIdForOrganization(id, profile.orgId)
+    if (!belongsToOrganization(existing, profile.orgId)) {
       return NextResponse.json({ error: 'Property not found' }, { status: 404 })
     }
 
@@ -115,29 +122,62 @@ export async function PATCH(
     }
 
     const { assignedUserIds, ...propertyData } = parsed.data
+    const mutation = await db.transaction(async (tx) => {
+      const uniqueAssignedUserIds = assignedUserIds === undefined
+        ? undefined
+        : [...new Set(assignedUserIds)]
+      const referencedUserIds = [...new Set([
+        ...(uniqueAssignedUserIds ?? []),
+        ...(propertyData.primaryPmId ? [propertyData.primaryPmId] : []),
+      ])]
 
-    // Update property fields
-    const updated = await updateProperty(id, propertyData)
+      if (referencedUserIds.length > 0) {
+        const referencedProfiles = await tx
+          .select({ id: profiles.id, orgId: profiles.orgId })
+          .from(profiles)
+          .where(inArray(profiles.id, referencedUserIds))
 
-    // Update property assignments if provided
-    if (assignedUserIds !== undefined) {
-      // Remove all existing assignments for this property
-      await db
-        .delete(propertyAssignments)
-        .where(eq(propertyAssignments.propertyId, id))
-
-      // Insert new assignments
-      if (assignedUserIds.length > 0) {
-        await db.insert(propertyAssignments).values(
-          assignedUserIds.map((userId) => ({
-            userId,
-            propertyId: id,
-          }))
-        )
+        if (!referencesBelongToOrganization(
+          referencedUserIds,
+          referencedProfiles,
+          profile.orgId
+        )) {
+          return { ok: false as const }
+        }
       }
+
+      const [updated] = await tx
+        .update(properties)
+        .set({ ...propertyData, updatedAt: new Date() })
+        .where(and(eq(properties.id, id), eq(properties.orgId, profile.orgId)))
+        .returning()
+
+      if (uniqueAssignedUserIds !== undefined) {
+        await tx
+          .delete(propertyAssignments)
+          .where(eq(propertyAssignments.propertyId, id))
+
+        if (uniqueAssignedUserIds.length > 0) {
+          await tx.insert(propertyAssignments).values(
+            uniqueAssignedUserIds.map((userId) => ({
+              userId,
+              propertyId: id,
+            }))
+          )
+        }
+      }
+
+      return { ok: true as const, updated }
+    })
+
+    if (!mutation.ok) {
+      return NextResponse.json(
+        { error: 'Forbidden: user does not belong to your organization' },
+        { status: 403 }
+      )
     }
 
-    return NextResponse.json(updated)
+    return NextResponse.json(mutation.updated)
   } catch (error) {
     console.error('PATCH /api/properties/[id] error:', error)
     return NextResponse.json(
@@ -170,19 +210,33 @@ export async function DELETE(
       return NextResponse.json({ error: 'Forbidden: admin access required' }, { status: 403 })
     }
 
-    const existing = await getPropertyById(id)
-    if (!existing) {
+    const existing = await getPropertyByIdForOrganization(id, profile.orgId)
+    if (!belongsToOrganization(existing, profile.orgId)) {
       return NextResponse.json({ error: 'Property not found' }, { status: 404 })
     }
 
     const hard = request.nextUrl.searchParams.get('hard') === 'true'
 
     if (hard) {
-      await deleteProperty(id)
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(surveySubmissions)
+          .where(eq(surveySubmissions.propertyId, id))
+        await tx
+          .delete(propertyAssignments)
+          .where(eq(propertyAssignments.propertyId, id))
+        await tx
+          .delete(properties)
+          .where(and(eq(properties.id, id), eq(properties.orgId, profile.orgId)))
+      })
       return NextResponse.json({ success: true, deleted: id })
     }
 
-    const deactivated = await updateProperty(id, { isActive: false })
+    const [deactivated] = await db
+      .update(properties)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(and(eq(properties.id, id), eq(properties.orgId, profile.orgId)))
+      .returning()
     return NextResponse.json(deactivated)
   } catch (error) {
     console.error('DELETE /api/properties/[id] error:', error)

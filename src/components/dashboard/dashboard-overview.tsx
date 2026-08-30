@@ -222,9 +222,11 @@ export function DashboardOverview({
   surveyType,
 }: DashboardOverviewProps) {
   const router = useRouter()
-  const [, setDateRange] = useState<{ from: Date; to: Date }>({
-    from: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000),
-    to: new Date(),
+  const [, setDateRange] = useState<{ from: Date; to: Date }>(() => {
+    const to = new Date()
+    const from = new Date(to)
+    from.setDate(from.getDate() - 180)
+    return { from, to }
   })
 
   const handleDateChange = useCallback(

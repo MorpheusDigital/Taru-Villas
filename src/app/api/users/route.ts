@@ -1,26 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
 import { getProfile } from '@/lib/auth/guards'
-import { getProfiles, createProfile, getProfileByEmail } from '@/lib/db/queries/profiles'
+import {
+  inviteUserForOrganization,
+  parseInviteUser,
+} from '@/lib/auth/invitations'
+import { getProfiles, getProfileByEmail } from '@/lib/db/queries/profiles'
+import { getProperties } from '@/lib/db/queries/properties'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { db } from '@/lib/db'
-import { propertyAssignments } from '@/lib/db/schema'
-
-// ---------------------------------------------------------------------------
-// Validation
-// ---------------------------------------------------------------------------
-
-const inviteUserSchema = z.object({
-  email: z
-    .string()
-    .email('Must be a valid email')
-    .refine((email) => email.endsWith('@taruvillas.com'), {
-      message: 'Email must be a @taruvillas.com address',
-    }),
-  fullName: z.string().min(1, 'Full name is required').max(255),
-  role: z.enum(['admin', 'property_manager', 'staff']),
-  propertyIds: z.array(z.string().uuid('Invalid property ID')).default([]),
-})
+import { profiles, propertyAssignments } from '@/lib/db/schema'
+import { getApplicationOrigin } from '@/lib/auth/callback'
 
 // ---------------------------------------------------------------------------
 // GET /api/users
@@ -69,7 +58,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const parsed = inviteUserSchema.safeParse(body)
+    const parsed = parseInviteUser(body)
     if (!parsed.success) {
       return NextResponse.json(
         { error: 'Validation failed', details: parsed.error.flatten().fieldErrors },
@@ -77,52 +66,62 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { email, fullName, role, propertyIds } = parsed.data
-
-    // Check if user already exists
-    const existingProfile = await getProfileByEmail(email)
-    if (existingProfile) {
-      return NextResponse.json(
-        { error: 'A user with this email already exists' },
-        { status: 409 }
-      )
-    }
-
-    // Create auth user via Supabase admin client (sends invite email)
     const supabaseAdmin = createAdminClient()
-    const { data: authData, error: authError } =
-      await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-        data: { full_name: fullName, role },
-      })
+    const redirectTo = new URL('/callback', getApplicationOrigin()).toString()
+    const result = await inviteUserForOrganization(profile, parsed.data, {
+      getOrganizationPropertyIds: async (orgId) => {
+        const organizationProperties = await getProperties(orgId)
+        return organizationProperties.map((property) => property.id)
+      },
+      getExistingProfile: getProfileByEmail,
+      inviteUserByEmail: async ({ email, fullName, role }) => {
+        const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+          email,
+          {
+            data: {
+              full_name: fullName,
+              role,
+              organization_id: profile.orgId,
+            },
+            redirectTo,
+          }
+        )
+        if (error) throw error
+        return { id: data.user.id }
+      },
+      persistInvitedUser: async ({ propertyIds, ...profileData }) =>
+        db.transaction(async (tx) => {
+          const [newProfile] = await tx
+            .insert(profiles)
+            .values(profileData)
+            .returning()
 
-    if (authError) {
-      console.error('Supabase invite error:', authError)
-      return NextResponse.json(
-        { error: `Failed to create auth user: ${authError.message}` },
-        { status: 500 }
-      )
-    }
+          if (propertyIds.length > 0) {
+            await tx.insert(propertyAssignments).values(
+              propertyIds.map((propertyId) => ({
+                userId: newProfile.id,
+                propertyId,
+              }))
+            )
+          }
 
-    // Create profile in our database
-    const newProfile = await createProfile({
-      id: authData.user.id,
-      orgId: profile.orgId,
-      email,
-      fullName,
-      role,
+          return newProfile
+        }),
+      deleteInvitedUser: async (userId) => {
+        const { error } = await supabaseAdmin.auth.admin.deleteUser(userId)
+        if (error) throw error
+      },
+      logError: (message, error) => console.error(`${message}:`, error),
     })
 
-    // Create property assignments
-    if (propertyIds.length > 0) {
-      await db.insert(propertyAssignments).values(
-        propertyIds.map((propertyId) => ({
-          userId: newProfile.id,
-          propertyId,
-        }))
+    if (!result.ok) {
+      return NextResponse.json(
+        { error: result.error },
+        { status: result.status }
       )
     }
 
-    return NextResponse.json(newProfile, { status: 201 })
+    return NextResponse.json(result.profile, { status: result.status })
   } catch (error) {
     console.error('POST /api/users error:', error)
     return NextResponse.json(

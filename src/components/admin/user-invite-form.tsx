@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { Property } from '@/lib/db/schema'
+import { validateInviteEmail } from '@/lib/auth/invitations'
 
 interface UserInviteFormValues {
   email: string
@@ -84,12 +85,6 @@ export function UserInviteForm({ onSuccess }: UserInviteFormProps) {
   }
 
   async function onSubmit(data: UserInviteFormValues) {
-    // Validate email domain
-    if (!data.email.endsWith('@taruvillas.com')) {
-      toast.error('Email must be a @taruvillas.com address')
-      return
-    }
-
     setIsSubmitting(true)
     try {
       const res = await fetch('/api/users', {
@@ -123,12 +118,10 @@ export function UserInviteForm({ onSuccess }: UserInviteFormProps) {
         <Input
           id="email"
           type="email"
-          placeholder="name@taruvillas.com"
+          placeholder="manager@client.example"
           {...register('email', {
             required: 'Email is required',
-            validate: (value) =>
-              value.endsWith('@taruvillas.com') ||
-              'Email must be a @taruvillas.com address',
+            validate: validateInviteEmail,
           })}
         />
         {errors.email && (

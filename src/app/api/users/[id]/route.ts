@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { getProfile } from '@/lib/auth/guards'
 import {
-  getProfileById,
-  updateProfile,
+  getProfileByIdForOrganization,
 } from '@/lib/db/queries/profiles'
-import { getProfileWithAssignments } from '@/lib/db/queries/profiles'
+import { getProfileWithAssignmentsForOrganization } from '@/lib/db/queries/profiles'
 import { db } from '@/lib/db'
-import { propertyAssignments } from '@/lib/db/schema'
+import { profiles, properties, propertyAssignments } from '@/lib/db/schema'
+import {
+  belongsToOrganization,
+  referencesBelongToOrganization,
+} from '@/lib/auth/organization-scope'
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -51,7 +54,7 @@ export async function GET(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const user = await getProfileWithAssignments(id)
+    const user = await getProfileWithAssignmentsForOrganization(id, profile.orgId)
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
@@ -87,8 +90,8 @@ export async function PATCH(
       return NextResponse.json({ error: 'Forbidden: admin access required' }, { status: 403 })
     }
 
-    const existing = await getProfileById(id)
-    if (!existing) {
+    const existing = await getProfileByIdForOrganization(id, profile.orgId)
+    if (!belongsToOrganization(existing, profile.orgId)) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
@@ -103,33 +106,60 @@ export async function PATCH(
 
     const { propertyIds, ...profileData } = parsed.data
 
-    // Update profile fields if any provided
-    let updatedProfile = existing
-    if (Object.keys(profileData).length > 0) {
-      const result = await updateProfile(id, profileData)
-      if (result) updatedProfile = result
-    }
+    const mutation = await db.transaction(async (tx) => {
+      const uniquePropertyIds = propertyIds === undefined
+        ? undefined
+        : [...new Set(propertyIds)]
 
-    // Update property assignments if provided
-    if (propertyIds !== undefined) {
-      // Remove all existing assignments
-      await db
-        .delete(propertyAssignments)
-        .where(eq(propertyAssignments.userId, id))
+      if (uniquePropertyIds && uniquePropertyIds.length > 0) {
+        const referencedProperties = await tx
+          .select({ id: properties.id, orgId: properties.orgId })
+          .from(properties)
+          .where(inArray(properties.id, uniquePropertyIds))
 
-      // Insert new assignments
-      if (propertyIds.length > 0) {
-        await db.insert(propertyAssignments).values(
-          propertyIds.map((propertyId) => ({
-            userId: id,
-            propertyId,
-          }))
-        )
+        if (!referencesBelongToOrganization(
+          uniquePropertyIds,
+          referencedProperties,
+          profile.orgId
+        )) {
+          return { ok: false as const }
+        }
       }
+
+      if (Object.keys(profileData).length > 0) {
+        await tx
+          .update(profiles)
+          .set({ ...profileData, updatedAt: new Date() })
+          .where(and(eq(profiles.id, id), eq(profiles.orgId, profile.orgId)))
+      }
+
+      if (uniquePropertyIds !== undefined) {
+        await tx
+          .delete(propertyAssignments)
+          .where(eq(propertyAssignments.userId, id))
+
+        if (uniquePropertyIds.length > 0) {
+          await tx.insert(propertyAssignments).values(
+            uniquePropertyIds.map((propertyId) => ({
+              userId: id,
+              propertyId,
+            }))
+          )
+        }
+      }
+
+      return { ok: true as const }
+    })
+
+    if (!mutation.ok) {
+      return NextResponse.json(
+        { error: 'Forbidden: property does not belong to your organization' },
+        { status: 403 }
+      )
     }
 
     // Return the updated profile with assignments
-    const result = await getProfileWithAssignments(id)
+    const result = await getProfileWithAssignmentsForOrganization(id, profile.orgId)
 
     return NextResponse.json(result)
   } catch (error) {
@@ -170,12 +200,16 @@ export async function DELETE(
       )
     }
 
-    const existing = await getProfileById(id)
-    if (!existing) {
+    const existing = await getProfileByIdForOrganization(id, profile.orgId)
+    if (!belongsToOrganization(existing, profile.orgId)) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    const deactivated = await updateProfile(id, { isActive: false })
+    const [deactivated] = await db
+      .update(profiles)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(and(eq(profiles.id, id), eq(profiles.orgId, profile.orgId)))
+      .returning()
 
     return NextResponse.json(deactivated)
   } catch (error) {
