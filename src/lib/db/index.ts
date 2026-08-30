@@ -3,10 +3,10 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import * as schema from './schema'
 
-function createDatabase(connectionString: string) {
+function createDatabase(connectionString: string, maxConnections = 10) {
   const client = postgres(connectionString, {
     prepare: false,
-    max: 10,
+    max: maxConnections,
     idle_timeout: 20,
     connect_timeout: 10,
   })
@@ -52,7 +52,7 @@ function getWorkerDatabase(): Database | null {
   const existingDatabase = workerDatabases.get(context.ctx)
   if (existingDatabase) return existingDatabase
 
-  const database = createDatabase(connectionString)
+  const database = createDatabase(connectionString, 5)
   workerDatabases.set(context.ctx, database)
   return database
 }

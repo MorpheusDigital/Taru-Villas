@@ -72,7 +72,7 @@ describe('database connection selection', () => {
 
     expect(mocks.postgres).toHaveBeenCalledWith('postgres://hyperdrive', {
       prepare: false,
-      max: 10,
+      max: 5,
       idle_timeout: 20,
       connect_timeout: 10,
     })
@@ -91,7 +91,7 @@ describe('database connection selection', () => {
 
     expect(mocks.postgres).toHaveBeenCalledWith(
       'postgres://local-postgres',
-      expect.objectContaining({ prepare: false })
+      expect.objectContaining({ prepare: false, max: 10 })
     )
   })
 
@@ -107,7 +107,7 @@ describe('database connection selection', () => {
 
     expect(mocks.postgres).toHaveBeenCalledWith(
       'postgres://local-database',
-      expect.objectContaining({ prepare: false })
+      expect.objectContaining({ prepare: false, max: 10 })
     )
   })
 
