@@ -47,3 +47,6 @@ next-env.d.ts
 
 # Local git worktrees (isolated feature workspaces)
 .worktrees/
+
+# OpenNext generated Worker output
+.open-next/
