@@ -66,7 +66,7 @@ function LoginFormContent({ inviteOnly }: { inviteOnly: boolean }) {
           return
         }
 
-        router.push('/dashboard')
+        router.push('/')
         return
       }
 
@@ -85,7 +85,7 @@ function LoginFormContent({ inviteOnly }: { inviteOnly: boolean }) {
         }
       }
 
-      router.push('/dashboard')
+      router.push('/')
     } catch {
       setFormError('Something went wrong. Please try again.')
     } finally {

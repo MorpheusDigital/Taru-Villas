@@ -94,7 +94,7 @@ export async function requireRole(roles: UserRole[]) {
   }
 
   if (!roles.includes(profile.role as UserRole)) {
-    redirect('/surveys')
+    redirect('/tasks')
   }
 
   return profile

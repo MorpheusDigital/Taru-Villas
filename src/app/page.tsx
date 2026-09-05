@@ -12,5 +12,5 @@ export default async function Home() {
     redirect('/dashboard')
   }
 
-  redirect('/surveys')
+  redirect('/tasks')
 }

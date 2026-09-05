@@ -51,7 +51,7 @@ export default async function PropertyDashboardPage({
     (a) => a.propertyId === propertyId
   )
   if (!isAdmin && !isPM && !isAssigned) {
-    redirect('/surveys')
+    redirect('/tasks')
   }
 
   // Fetch all dashboard data in parallel — only submitted surveys

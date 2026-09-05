@@ -236,7 +236,7 @@ export function AppSidebar() {
         )}
 
         {/* ---- Properties Section (Property Manager + Admin) ---- */}
-        {showPropertySection && (
+        {showPropertySection && visiblePropertyNavItems.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel>Property Content</SidebarGroupLabel>
             <SidebarGroupContent>
