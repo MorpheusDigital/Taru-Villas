@@ -4,9 +4,23 @@ import { addDays } from './dates'
 const text = z.string().trim().max(255).nullable().optional()
 const flag = z.boolean().nullable().optional()
 const calendarDate = z.iso.date().nullable().optional()
+// Decimal strings preserve source precision and avoid floating-point currency rounding.
+const money = z.string().regex(/^\d{1,15}(\.\d{1,2})?$/, 'Enter a non-negative amount without commas').nullable().optional()
 
 export const complianceSchema = z.object({
-  originalBookAvailable: flag, bookOwner: text, ownership: z.enum(['leased', 'owned']).nullable().optional(),
+  originalBookAvailable: flag, bookOwner: text, ownership: z.enum(['leased', 'owned', 'refinanced']).nullable().optional(),
+  chassisNo: text, purchaseDate: calendarDate, transferDate: calendarDate,
+  ownershipNotes: text, absoluteOwner: text, purchaseValue: money, leasedValue: money,
+  leaseTenureMonths: z.string().regex(/^\d{1,4}$/, 'Enter whole months').nullable().optional(),
+  leaseStart: calendarDate, leaseEnd: calendarDate, assignedCustodian: text,
+  driverName: text, driverLicenceNo: text, driverLicenceExpiry: calendarDate,
+  emissionRequired: flag, insuranceStatusNote: text,
+  recordNotes: z.string().max(4000).nullable().optional(),
+  sourceRecord: z.object({
+    fileName: z.string().max(255), digest: z.string().regex(/^[a-f0-9]{64}$/), column: z.number().int().min(3),
+    cells: z.array(z.object({ row: z.number().int().positive(), section: z.string().max(255), detail: z.string().max(255), value: z.string().max(2000) })).max(200),
+    warnings: z.array(z.string().max(1000)).max(100),
+  }).nullable().optional(),
   revenueLicenceValid: flag, revenueLicenceType: text, revenueLicenceStart: calendarDate, revenueLicenceEnd: calendarDate,
   insuranceValid: flag, insurancePolicyNo: text, insuranceStart: calendarDate, insuranceEnd: calendarDate, insuranceProvider: text,
   emissionValid: flag, emissionStart: calendarDate, emissionEnd: calendarDate,
@@ -54,6 +68,7 @@ export function renewalCandidates(vehicle: {
 }, today: string) {
   if (vehicle.status === 'retired' || !vehicle.administrationManagerId) return []
   return renewalKinds.flatMap(({ kind, label }) => {
+    if (kind === 'emission' && vehicle.compliance.emissionRequired === false) return []
     const expiry = vehicle.compliance[`${kind}End`]
     if (!expiry) return []
     const start = addDays(expiry, -vehicle.renewalLeadDays)

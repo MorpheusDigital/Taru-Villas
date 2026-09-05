@@ -24,7 +24,7 @@ export default async function VehicleRenewalPage({ params }: { params: Promise<{
     {!vehicle.administrationManagerId && <p className="text-sm text-amber-700">An Administration Manager must be assigned before tasks can be created.</p>}
     {documents.map(doc => <section key={doc.kind} className="space-y-3 border-t pt-4">
       <h2 className="font-semibold">{doc.label}</h2>
-      <p className="text-sm">Expiry: {doc.expiry ?? 'Not recorded'} · {documentStatus(doc.expiry, vehicle.compliance[`${doc.kind}Valid`], colomboToday(), vehicle.renewalLeadDays)}</p>
+      <p className="text-sm">{doc.kind === 'emission' && vehicle.compliance.emissionRequired === false ? 'Not applicable' : `Expiry: ${doc.expiry ?? 'Not recorded'} · ${documentStatus(doc.expiry, vehicle.compliance[`${doc.kind}Valid`], colomboToday(), vehicle.renewalLeadDays)}`}</p>
       {cycles.filter(c => c.kind === doc.kind).map(c => <div key={c.taskId} className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <span>{c.expiry} — {c.status.replaceAll('_', ' ')}</span>
         <Link className="underline underline-offset-2" href={`/tasks/${c.projectId}?task=${c.taskId}`}>Open renewal task</Link>

@@ -139,7 +139,7 @@ function createColumns(
     {
       accessorKey: 'maxPassengers',
       header: 'Seats',
-      cell: ({ row }) => row.original.maxPassengers,
+      cell: ({ row }) => row.original.maxPassengers === 0 && row.original.compliance.sourceRecord ? 'Not confirmed' : row.original.maxPassengers,
     },
     {
       id: 'cargoCapable',
@@ -520,7 +520,7 @@ export function VehiclesClient({ vehicles, properties, managers }: VehiclesClien
           return <div className="min-w-44 space-y-1 text-xs">
             <div className={!manager?.isActive ? 'text-amber-700' : ''}>{manager?.isActive ? manager.fullName : 'Assign an active manager'}</div>
             {renewalKinds.map(({ kind, label }) => {
-              const status = documentStatus(v.compliance[`${kind}End`], v.compliance[`${kind}Valid`], colomboToday(), v.renewalLeadDays)
+              const status = kind === 'emission' && v.compliance.emissionRequired === false ? 'Not applicable' : documentStatus(v.compliance[`${kind}End`], v.compliance[`${kind}Valid`], colomboToday(), v.renewalLeadDays)
               return <div key={kind} className={status === 'Expired' || status === 'Invalid' ? 'text-red-700' : status === 'Current' ? 'text-muted-foreground' : 'text-amber-700'}>{label}: {status}</div>
             })}
             <Link className="inline-block underline underline-offset-2" href={`/fleet/vehicles/${v.id}`}>View renewal tasks</Link>
