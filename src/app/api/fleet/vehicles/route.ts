@@ -1,25 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
 import { getProfile } from '@/lib/auth/guards'
-import { createVehicle, listVehicles } from '@/lib/db/queries/fleet'
+import { listVehicles } from '@/lib/db/queries/fleet'
+import { saveVehicle, VehicleValidationError } from '@/lib/db/queries/vehicle-renewals'
+import { vehicleInputSchema } from '@/lib/fleet/vehicle-compliance'
 
-const createSchema = z.object({
-  name: z.string().min(1).max(255),
-  registrationNo: z.string().max(50).nullable().optional(),
-  maxPassengers: z.number().int().min(0).max(60),
-  cargoCapable: z.boolean().default(false),
-  isRestricted: z.boolean().default(false),
-  status: z.enum(['active', 'maintenance', 'retired']).default('active'),
-  currentLocationPropertyId: z.string().uuid().nullable().optional(),
-  sortOrder: z.number().int().default(0),
-})
+const createSchema = vehicleInputSchema
 
 export async function GET() {
   try {
     const profile = await getProfile()
     if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
-    return NextResponse.json({ vehicles: await listVehicles(profile.orgId) })
+    return NextResponse.json({ vehicles: await listVehicles(profile.orgId, profile.role === 'admin') })
   } catch (error) {
     console.error('GET /api/fleet/vehicles error:', error)
     return NextResponse.json({ error: 'Failed to fetch vehicles' }, { status: 500 })
@@ -42,7 +34,7 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const vehicle = await createVehicle({
+      const vehicle = await saveVehicle(profile.orgId, {
         ...parsed.data,
         registrationNo: parsed.data.registrationNo ?? null,
         currentLocationPropertyId: parsed.data.currentLocationPropertyId ?? null,
@@ -50,6 +42,7 @@ export async function POST(request: NextRequest) {
       })
       return NextResponse.json(vehicle, { status: 201 })
     } catch (e) {
+      if (e instanceof VehicleValidationError) return NextResponse.json({ error: e.message }, { status: 400 })
       // A duplicate (orgId, name) pair is protected by vehicles_org_name_unique.
       const code = (e as { code?: string }).code
       if (code === '23505') {

@@ -1,23 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
 import { and, eq } from 'drizzle-orm'
 import { getProfile } from '@/lib/auth/guards'
-import { deleteVehicle, updateVehicle } from '@/lib/db/queries/fleet'
+import { deleteVehicle } from '@/lib/db/queries/fleet'
+import { saveVehicle, VehicleValidationError } from '@/lib/db/queries/vehicle-renewals'
+import { vehiclePatchSchema } from '@/lib/fleet/vehicle-compliance'
 import { db } from '@/lib/db'
 import { vehicles } from '@/lib/db/schema'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
-const updateSchema = z.object({
-  name: z.string().min(1).max(255).optional(),
-  registrationNo: z.string().max(50).nullable().optional(),
-  maxPassengers: z.number().int().min(0).max(60).optional(),
-  cargoCapable: z.boolean().optional(),
-  isRestricted: z.boolean().optional(),
-  status: z.enum(['active', 'maintenance', 'retired']).optional(),
-  currentLocationPropertyId: z.string().uuid().nullable().optional(),
-  sortOrder: z.number().int().optional(),
-})
+const updateSchema = vehiclePatchSchema
 
 // Task 6's updateVehicle/deleteVehicle take a bare id with no org filter, so
 // this route is the only thing standing between an admin of one org and a
@@ -51,10 +43,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     try {
-      const updated = await updateVehicle(id, parsed.data)
+      const updated = await saveVehicle(profile.orgId, parsed.data, id)
       if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 })
       return NextResponse.json(updated)
     } catch (e) {
+      if (e instanceof VehicleValidationError) return NextResponse.json({ error: e.message }, { status: 400 })
       // A rename onto an existing (orgId, name) pair hits vehicles_org_name_unique.
       const code = (e as { code?: string }).code
       if (code === '23505') {
@@ -90,7 +83,7 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
     const code = (error as { code?: string }).code
     if (code === '23503') {
       return NextResponse.json(
-        { error: 'This vehicle has dispatches and cannot be deleted. Set it to retired instead.' },
+        { error: 'This vehicle has dispatches or renewal history and cannot be deleted. Set it to retired instead.' },
         { status: 409 },
       )
     }

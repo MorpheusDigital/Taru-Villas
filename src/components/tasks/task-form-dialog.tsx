@@ -244,6 +244,10 @@ export function TaskFormDialog({
           </DialogHeader>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            {task?.vehicleRenewal && <div className="rounded-md border p-3 text-sm">
+              <Link className="font-medium underline underline-offset-2" href={`/fleet/vehicles/${task.vehicleRenewal.vehicleId}`}>View vehicle renewal details</Link>
+              <p className="mt-1 text-muted-foreground">Expiry: {task.vehicleRenewal.expiryDate}. Dates and the Administration Manager are managed on the vehicle record.</p>
+            </div>}
             {/* Title */}
             <div className="space-y-1.5">
               <Label htmlFor="task-title">
@@ -326,7 +330,7 @@ export function TaskFormDialog({
                 control={control}
                 name="projectId"
                 render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
+                  <Select value={field.value} onValueChange={field.onChange} disabled={!!task?.vehicleRenewal}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select project" />
                     </SelectTrigger>
@@ -375,6 +379,7 @@ export function TaskFormDialog({
               <Input
                 id="task-due-date"
                 type="date"
+                readOnly={!!task?.vehicleRenewal}
                 {...register('dueDate')}
               />
             </div>
@@ -454,6 +459,7 @@ export function TaskFormDialog({
                     type="button"
                     variant="outline"
                     className="w-full justify-start font-normal"
+                    disabled={!!task?.vehicleRenewal}
                   >
                     {multiLabel(assigneeIds.length, 'person', 'assignees')}
                   </Button>

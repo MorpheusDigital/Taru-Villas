@@ -1532,10 +1532,25 @@ export const vehicles = pgTable('vehicles', {
   currentLocationPropertyId: uuid('current_location_property_id')
     .references(() => properties.id, { onDelete: 'set null' }),
   assetId: uuid('asset_id').references(() => assets.id, { onDelete: 'set null' }),
+  administrationManagerId: uuid('administration_manager_id').references(() => profiles.id, { onDelete: 'set null' }),
+  renewalLeadDays: integer('renewal_lead_days').default(30).notNull(),
+  compliance: jsonb('compliance').$type<import('../fleet/vehicle-compliance').VehicleCompliance>().default({}).notNull(),
   sortOrder: integer('sort_order').default(0).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [unique('vehicles_org_name_unique').on(t.orgId, t.name)])
+
+// Ledger survives repeated checks and task completion: one obligation per expiry cycle.
+export const vehicleRenewals = pgTable('vehicle_renewals', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id),
+  vehicleId: uuid('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'restrict' }),
+  kind: varchar('kind', { length: 32 }).$type<import('../fleet/vehicle-compliance').RenewalKind>().notNull(),
+  expiryDate: date('expiry_date').notNull(),
+  taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'restrict' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [unique('vehicle_renewals_cycle_unique').on(t.vehicleId, t.kind, t.expiryDate)])
 
 export const drivers = pgTable('drivers', {
   id: uuid('id').defaultRandom().primaryKey(),

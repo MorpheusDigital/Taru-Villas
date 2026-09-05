@@ -37,6 +37,7 @@ import type { TaskWithRelations } from '@/lib/db/queries/tasks'
 const NONE = '_none_'
 
 interface TasksPageClientProps {
+  initialTaskId?: string
   tasks: TaskWithRelations[]
   properties: { id: string; name: string }[]
   teams: { id: string; name: string }[]
@@ -58,6 +59,7 @@ export function TasksPageClient({
   project,
   projects,
   canDeleteProject,
+  initialTaskId,
 }: TasksPageClientProps) {
   const router = useRouter()
   const [view, setView] = useQueryState('view', { defaultValue: 'board' })
@@ -68,8 +70,8 @@ export function TasksPageClient({
   const [priorityFilter, setPriorityFilter] = useState(NONE)
   const [assigneeFilter, setAssigneeFilter] = useState(NONE)
 
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingTask, setEditingTask] = useState<TaskWithRelations | null>(null)
+  const [dialogOpen, setDialogOpen] = useState(() => tasks.some(t => t.id === initialTaskId))
+  const [editingTask, setEditingTask] = useState<TaskWithRelations | null>(() => tasks.find(t => t.id === initialTaskId) ?? null)
 
   const [editProjectOpen, setEditProjectOpen] = useState(false)
   const [showDeleteProject, setShowDeleteProject] = useState(false)
@@ -98,7 +100,7 @@ export function TasksPageClient({
   }
 
   const canDelete = editingTask
-    ? isAdmin || editingTask.createdBy === currentUserId
+    ? !editingTask.vehicleRenewal && (isAdmin || editingTask.createdBy === currentUserId)
     : false
 
   async function handleDeleteProject() {

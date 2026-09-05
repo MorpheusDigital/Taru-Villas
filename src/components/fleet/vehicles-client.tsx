@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import {
   useReactTable,
   getCoreRowModel,
@@ -69,6 +70,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { Property, Vehicle } from '@/lib/db/schema'
+import { VehicleComplianceFields, type VehicleFormValues, type ManagerOption } from './vehicle-compliance-fields'
+import { complianceSchema, documentStatus, renewalKinds } from '@/lib/fleet/vehicle-compliance'
+import { colomboToday } from '@/lib/fleet/dates'
 
 // Radix Select forbids an empty-string item value — use a sentinel for "no property".
 const HEAD_OFFICE = '_head_office_'
@@ -211,24 +215,14 @@ function createColumns(
 // Create/edit form
 // ---------------------------------------------------------------------------
 
-interface VehicleFormValues {
-  name: string
-  registrationNo: string
-  maxPassengers: number
-  cargoCapable: boolean
-  isRestricted: boolean
-  status: 'active' | 'maintenance' | 'retired'
-  currentLocationPropertyId: string
-  sortOrder: number
-}
-
 interface VehicleFormProps {
   vehicle?: Vehicle | null
   properties: Property[]
   onSuccess: () => void
+  managers: ManagerOption[]
 }
 
-function VehicleForm({ vehicle, properties, onSuccess }: VehicleFormProps) {
+function VehicleForm({ vehicle, properties, managers, onSuccess }: VehicleFormProps) {
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const isEditing = !!vehicle
@@ -248,12 +242,17 @@ function VehicleForm({ vehicle, properties, onSuccess }: VehicleFormProps) {
       status: vehicle?.status ?? 'active',
       currentLocationPropertyId: vehicle?.currentLocationPropertyId ?? HEAD_OFFICE,
       sortOrder: vehicle?.sortOrder ?? 0,
+      administrationManagerId: vehicle?.administrationManagerId ?? '',
+      renewalLeadDays: vehicle?.renewalLeadDays ?? 30,
+      compliance: vehicle?.compliance ?? {},
     },
   })
 
   async function onSubmit(values: VehicleFormValues) {
     setIsSubmitting(true)
     try {
+      const compliance = complianceSchema.safeParse(Object.fromEntries(Object.entries(values.compliance).map(([key, value]) => [key, value === '' ? null : value])))
+      if (!compliance.success) throw new Error(compliance.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; '))
       const body = {
         name: values.name,
         registrationNo: values.registrationNo.trim() || null,
@@ -266,6 +265,9 @@ function VehicleForm({ vehicle, properties, onSuccess }: VehicleFormProps) {
             ? null
             : values.currentLocationPropertyId,
         sortOrder: values.sortOrder,
+        administrationManagerId: values.administrationManagerId || null,
+        renewalLeadDays: values.renewalLeadDays,
+        compliance: compliance.data,
       }
 
       const res = await fetch(
@@ -421,7 +423,9 @@ function VehicleForm({ vehicle, properties, onSuccess }: VehicleFormProps) {
         />
       </div>
 
-      <div className="flex justify-end gap-3 pt-2">
+      <VehicleComplianceFields control={control} register={register} managers={managers} />
+      {errors.renewalLeadDays && <p role="alert" className="text-sm text-destructive">Lead time must be a whole number from 0 to 365.</p>}
+      <div className="sticky bottom-0 flex justify-end gap-3 border-t bg-background py-3">
         <Button type="submit" disabled={isSubmitting}>
           {isSubmitting
             ? isEditing
@@ -443,9 +447,10 @@ function VehicleForm({ vehicle, properties, onSuccess }: VehicleFormProps) {
 interface VehiclesClientProps {
   vehicles: Vehicle[]
   properties: Property[]
+  managers: ManagerOption[]
 }
 
-export function VehiclesClient({ vehicles, properties }: VehiclesClientProps) {
+export function VehiclesClient({ vehicles, properties, managers }: VehiclesClientProps) {
   const router = useRouter()
 
   const [sorting, setSorting] = useState<SortingState>([])
@@ -453,6 +458,19 @@ export function VehiclesClient({ vehicles, properties }: VehiclesClientProps) {
   const [editVehicle, setEditVehicle] = useState<Vehicle | null>(null)
   const [deleteVehicleTarget, setDeleteVehicleTarget] = useState<Vehicle | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isChecking, setIsChecking] = useState(false)
+
+  async function checkRenewals() {
+    setIsChecking(true)
+    try {
+      const res = await fetch('/api/fleet/renewals', { method: 'POST' })
+      if (!res.ok) throw new Error(await parseErrorMessage(res, 'Renewal check failed'))
+      const result = await res.json()
+      toast.success(`Checked ${result.checked} vehicles; created ${result.created} renewal tasks`)
+      router.refresh()
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'Renewal check failed') }
+    finally { setIsChecking(false) }
+  }
 
   const propertyNameById = useMemo(() => {
     const map = new Map<string, string>()
@@ -493,8 +511,25 @@ export function VehiclesClient({ vehicles, properties }: VehiclesClientProps) {
   }
 
   const columns = useMemo(
-    () => createColumns(propertyNameById, handleEdit, handleDeleteClick),
-    [propertyNameById]
+    () => {
+      const result = createColumns(propertyNameById, handleEdit, handleDeleteClick)
+      result.splice(result.length - 1, 0, {
+        id: 'renewals', header: 'Renewals', cell: ({ row }) => {
+          const v = row.original
+          const manager = managers.find(m => m.id === v.administrationManagerId)
+          return <div className="min-w-44 space-y-1 text-xs">
+            <div className={!manager?.isActive ? 'text-amber-700' : ''}>{manager?.isActive ? manager.fullName : 'Assign an active manager'}</div>
+            {renewalKinds.map(({ kind, label }) => {
+              const status = documentStatus(v.compliance[`${kind}End`], v.compliance[`${kind}Valid`], colomboToday(), v.renewalLeadDays)
+              return <div key={kind} className={status === 'Expired' || status === 'Invalid' ? 'text-red-700' : status === 'Current' ? 'text-muted-foreground' : 'text-amber-700'}>{label}: {status}</div>
+            })}
+            <Link className="inline-block underline underline-offset-2" href={`/fleet/vehicles/${v.id}`}>View renewal tasks</Link>
+          </div>
+        },
+      })
+      return result
+    },
+    [propertyNameById, managers]
   )
 
   const table = useReactTable({
@@ -518,10 +553,13 @@ export function VehiclesClient({ vehicles, properties }: VehiclesClientProps) {
             Manage the fleet used for guest and staff transport
           </p>
         </div>
+        <div className="flex flex-wrap gap-2">
+        <Button variant="outline" onClick={checkRenewals} disabled={isChecking}>{isChecking ? 'Checking…' : 'Check renewals now'}</Button>
         <Button onClick={() => setCreateOpen(true)}>
           <Plus className="size-4" />
           Add Vehicle
         </Button>
+        </div>
       </div>
 
       {vehicles.length === 0 ? (
@@ -604,18 +642,18 @@ export function VehiclesClient({ vehicles, properties }: VehiclesClientProps) {
 
       {/* Create Dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Add Vehicle</DialogTitle>
             <DialogDescription>Add a vehicle to the fleet.</DialogDescription>
           </DialogHeader>
-          <VehicleForm properties={properties} onSuccess={() => setCreateOpen(false)} />
+          <VehicleForm properties={properties} managers={managers} onSuccess={() => setCreateOpen(false)} />
         </DialogContent>
       </Dialog>
 
       {/* Edit Dialog */}
       <Dialog open={!!editVehicle} onOpenChange={(open) => !open && setEditVehicle(null)}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Edit Vehicle</DialogTitle>
             <DialogDescription>Update vehicle details.</DialogDescription>
@@ -623,6 +661,7 @@ export function VehiclesClient({ vehicles, properties }: VehiclesClientProps) {
           {editVehicle && (
             <VehicleForm
               vehicle={editVehicle}
+              managers={managers}
               properties={properties}
               onSuccess={() => setEditVehicle(null)}
             />

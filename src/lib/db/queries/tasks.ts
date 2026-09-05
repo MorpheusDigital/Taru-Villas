@@ -2,7 +2,7 @@ import { eq, and, asc, desc, ilike, inArray, or, sql } from 'drizzle-orm'
 import { db } from '..'
 import {
   fleetRequests, fleetTripReports, issues, surveyQuestions, surveyResponses,
-  tasks, taskTeams, taskAssignees, taskTeamLinks, properties, profiles,
+  tasks, taskTeams, taskAssignees, taskTeamLinks, properties, profiles, vehicleRenewals,
   type Task, type NewTask, type TaskTeam,
 } from '../schema'
 
@@ -17,6 +17,7 @@ export interface TaskFilters {
 }
 
 export interface TaskWithRelations extends Task {
+  vehicleRenewal?: { vehicleId: string; kind: string; expiryDate: string } | null
   propertyName: string | null
   assignees: { id: string; fullName: string }[]
   teams: { id: string; name: string }[]
@@ -46,7 +47,7 @@ async function hydrate(rows: Task[]): Promise<TaskWithRelations[]> {
   const ids = rows.map((r) => r.id)
   const propIds = Array.from(new Set(rows.map((r) => r.propertyId).filter(Boolean))) as string[]
 
-  const [assigneeRows, teamRows, propRows, issueRows, reportRows] = await Promise.all([
+  const [assigneeRows, teamRows, propRows, issueRows, reportRows, renewalRows] = await Promise.all([
     db.select({ taskId: taskAssignees.taskId, id: profiles.id, fullName: profiles.fullName })
       .from(taskAssignees)
       .innerJoin(profiles, eq(taskAssignees.profileId, profiles.id))
@@ -88,6 +89,7 @@ async function hydrate(rows: Task[]): Promise<TaskWithRelations[]> {
       .innerJoin(fleetRequests, eq(fleetTripReports.requestId, fleetRequests.id))
       .where(or(inArray(fleetTripReports.taskId, ids), inArray(fleetRequests.taskId, ids)))
       .orderBy(desc(fleetTripReports.createdAt)),
+    db.select().from(vehicleRenewals).where(inArray(vehicleRenewals.taskId, ids)),
   ])
 
   const aByTask = new Map<string, { id: string; fullName: string }[]>()
@@ -134,6 +136,7 @@ async function hydrate(rows: Task[]): Promise<TaskWithRelations[]> {
 
   return rows.map((r) => ({
     ...r,
+    vehicleRenewal: renewalRows.find(renewal => renewal.taskId === r.id) ?? null,
     propertyName: r.propertyId ? propName.get(r.propertyId) ?? null : null,
     assignees: aByTask.get(r.id) ?? [],
     teams: tByTask.get(r.id) ?? [],

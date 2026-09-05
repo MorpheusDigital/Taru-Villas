@@ -18,12 +18,14 @@ export function generateDriverToken(): string {
 
 // --- Vehicles --------------------------------------------------------------
 
-export async function listVehicles(orgId: string) {
-  return db
+export async function listVehicles(orgId: string, includeCompliance = false) {
+  const rows = await db
     .select()
     .from(vehicles)
     .where(eq(vehicles.orgId, orgId))
     .orderBy(asc(vehicles.sortOrder), asc(vehicles.name))
+  // Booking and dispatch consumers do not need key locations, SIM or policy data.
+  return includeCompliance ? rows : rows.map(row => ({ ...row, compliance: {}, administrationManagerId: null, renewalLeadDays: 30 }))
 }
 
 export async function createVehicle(data: NewVehicle) {

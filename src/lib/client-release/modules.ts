@@ -99,6 +99,7 @@ const moduleRoutes: readonly [string, ClientModule][] = [
   ['/guest-profiles', 'guest-profiles'],
   ['/settings', 'settings'],
   ['/api/cron/fleet-optimize', 'fleet'],
+  ['/api/cron/vehicle-renewals', 'fleet'],
   ['/api/cron/guest-profiles-sync', 'guest-profiles'],
   ['/api/cron/electricity-autofill', 'utilities'],
 ]

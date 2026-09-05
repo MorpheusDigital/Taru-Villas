@@ -10,10 +10,12 @@ export const dynamic = 'force-dynamic'
 
 export default async function ProjectBoardPage({
   params,
-}: { params: Promise<{ projectId: string }> }) {
+  searchParams,
+}: { params: Promise<{ projectId: string }>; searchParams: Promise<{ task?: string }> }) {
   const profile = await requireAuth()
   if (!profile) return null
   const { projectId } = await params
+  const { task: initialTaskId } = await searchParams
   const project = await getProjectById(projectId)
   if (!project || project.orgId !== profile.orgId) notFound()
   const [tasks, teams, properties, users, allProjects] = await Promise.all([
@@ -26,6 +28,7 @@ export default async function ProjectBoardPage({
   return (
     <TasksPageClient
       tasks={tasks}
+      initialTaskId={initialTaskId}
       teams={teams}
       properties={properties.map((p) => ({ id: p.id, name: p.name }))}
       users={users.map((u) => ({ id: u.id, fullName: u.fullName }))}
