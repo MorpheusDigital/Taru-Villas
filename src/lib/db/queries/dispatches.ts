@@ -18,6 +18,7 @@ import {
 } from '../schema'
 import type { EngineInput, EngineResult } from '@/lib/fleet/types'
 import { getFleetSettings, listDistances } from './fleet'
+import { ensureTripReportsInTransaction, VisitReportError } from './fleet-trip-reports'
 
 // --- Requests --------------------------------------------------------------
 
@@ -27,7 +28,7 @@ export async function listRequests(
 ) {
   const conditions = [eq(fleetRequests.orgId, orgId)]
   if (filters.status) conditions.push(eq(fleetRequests.status, filters.status))
-  if (filters.requestedBy) conditions.push(eq(fleetRequests.requestedBy, filters.requestedBy))
+  if (filters.requestedBy) conditions.push(or(eq(fleetRequests.requestedBy, filters.requestedBy), eq(fleetRequests.reportOwnerId, filters.requestedBy), eq(fleetTripReports.submittedBy, filters.requestedBy))!)
 
   const originProperty = alias(properties, 'origin_property')
 
@@ -36,6 +37,8 @@ export async function listRequests(
       id: fleetRequests.id,
       requestType: fleetRequests.requestType,
       requestedBy: fleetRequests.requestedBy,
+      reportOwnerId: fleetRequests.reportOwnerId,
+      tripReportOwnerId: fleetTripReports.submittedBy,
       requesterName: profiles.fullName,
       // Needed client-side by the dispatch editor's mirror of
       // validateVehicleForCluster's restricted-vehicle rule — without it,
@@ -120,6 +123,9 @@ export async function createRequestWithTaskReason(
     | { kind: 'new'; title: string; projectId: string; propertyId: string },
 ) {
   return db.transaction(async (tx) => {
+    const reportOwnerId = request.reportOwnerId ?? request.requestedBy
+    const [owner] = await tx.select().from(profiles).where(and(eq(profiles.id, reportOwnerId), eq(profiles.orgId, request.orgId), eq(profiles.isActive, true))).for('share')
+    if (!owner) throw new VisitReportError('Choose an active report owner in your organization')
     const [property] = await tx
       .select({ id: properties.id })
       .from(properties)
@@ -163,18 +169,22 @@ export async function createRequestWithTaskReason(
       taskId = task.id
     }
 
-    const [created] = await tx.insert(fleetRequests).values({ ...request, taskId }).returning()
+    const [created] = await tx.insert(fleetRequests).values({ ...request, reportOwnerId, taskId }).returning()
     return created
   })
 }
 
 export async function updateRequest(id: string, data: Partial<NewFleetRequest>) {
-  const [updated] = await db
-    .update(fleetRequests)
-    .set({ ...data, updatedAt: new Date() })
-    .where(eq(fleetRequests.id, id))
-    .returning()
-  return updated
+  return db.transaction(async tx => {
+    const [existing] = await tx.select().from(fleetRequests).where(eq(fleetRequests.id, id)).for('update')
+    if (!existing || existing.status !== 'pending') throw new VisitReportError('Only pending requests can be edited')
+    if (data.reportOwnerId) {
+      const [owner] = await tx.select().from(profiles).where(and(eq(profiles.id, data.reportOwnerId), eq(profiles.orgId, existing.orgId), eq(profiles.isActive, true))).for('share')
+      if (!owner) throw new VisitReportError('Choose an active report owner in your organization')
+    }
+    const [updated] = await tx.update(fleetRequests).set({ ...data, updatedAt: new Date() }).where(eq(fleetRequests.id, id)).returning()
+    return updated
+  })
 }
 
 /**
@@ -199,12 +209,17 @@ export async function updateRequest(id: string, data: Partial<NewFleetRequest>) 
  * out of the query layer and wrapped so it can never affect the mutation
  * that triggered it.
  */
-export async function cancelRequest(id: string) {
-  return db.transaction(async (tx) => {
+export async function cancelRequest(id: string, allowDispatched = false) {
+  return db.transaction(tx => cancelRequestInTransaction(tx, id, allowDispatched))
+}
+
+export async function cancelRequestInTransaction(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], id: string, allowDispatched = false) {
     const [updated] = await tx
       .update(fleetRequests)
       .set({ status: 'cancelled', updatedAt: new Date() })
-      .where(eq(fleetRequests.id, id))
+      // PostgreSQL rechecks this predicate after waiting for a concurrent
+      // completion update, so a stale route read cannot strand its report.
+      .where(and(eq(fleetRequests.id, id), inArray(fleetRequests.status, allowDispatched ? ['pending', 'queued', 'dispatched'] : ['pending', 'queued'])))
       .returning()
     if (!updated) return undefined
 
@@ -233,7 +248,6 @@ export async function cancelRequest(id: string) {
         .filter((a) => a.dispatchStatus === 'approved' || a.dispatchStatus === 'in_progress')
         .map((a) => ({ dispatchId: a.dispatchId, driverId: a.driverId })),
     }
-  })
 }
 
 // --- Engine plumbing -------------------------------------------------------
@@ -1003,8 +1017,10 @@ export async function markStopArrived(stopId: string, driverId: string) {
  * which keeps the engine's "already parked nearest" tiebreak honest.
  */
 export async function completeDispatch(id: string, driverId: string) {
-  return db.transaction(async (tx) => {
-    const now = new Date()
+  return db.transaction(tx => completeDispatchInTransaction(tx, id, driverId))
+}
+
+export async function completeDispatchInTransaction(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], id: string, driverId: string, now = new Date()) {
     const [updated] = await tx
       .update(dispatches)
       .set({ status: 'completed', completedAt: now, updatedAt: now })
@@ -1034,7 +1050,7 @@ export async function completeDispatch(id: string, driverId: string) {
       await tx
         .update(vehicles)
         .set({ currentLocationPropertyId: lastPropertyId, updatedAt: now })
-        .where(eq(vehicles.id, updated.vehicleId))
+        .where(and(eq(vehicles.id, updated.vehicleId), eq(vehicles.orgId, updated.orgId)))
         .returning()
     }
 
@@ -1043,10 +1059,10 @@ export async function completeDispatch(id: string, driverId: string) {
       await tx
         .update(fleetRequests)
         .set({ status: 'completed', updatedAt: now })
-        .where(and(inArray(fleetRequests.id, requestIds), ne(fleetRequests.status, 'cancelled')))
+        .where(and(eq(fleetRequests.orgId, updated.orgId), inArray(fleetRequests.id, requestIds), ne(fleetRequests.status, 'cancelled')))
         .returning()
     }
 
+    await ensureTripReportsInTransaction(tx, id, now)
     return updated
-  })
 }

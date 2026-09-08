@@ -1,10 +1,29 @@
 import { eq, and, asc, desc, ilike, inArray, or, sql } from 'drizzle-orm'
 import { db } from '..'
 import {
-  fleetRequests, fleetTripReports, issues, surveyQuestions, surveyResponses,
+  fleetRequests, fleetTripReports, fleetReportTaskLinks, issues, surveyQuestions, surveyResponses,
   tasks, taskTeams, taskAssignees, taskTeamLinks, properties, profiles, vehicleRenewals,
   type Task, type NewTask, type TaskTeam,
 } from '../schema'
+
+export class TaskReportConflict extends Error {}
+export function assertVisitReportTaskEdit(
+  current: Pick<Task, 'status' | 'projectId' | 'dueDate'>,
+  report: { submittedAt: Date | null } | null,
+  data: Partial<NewTask>, currentAssigneeIds: string[], assigneeIds?: string[],
+) {
+  if (!report) return
+  if (report.submittedAt && data.status !== undefined && data.status !== 'done') throw new TaskReportConflict('A submitted visit report cannot be reopened.')
+  if (!report.submittedAt && data.status === 'done') throw new TaskReportConflict('Submit the visit report to complete this task.')
+  if ((data.projectId !== undefined && data.projectId !== current.projectId) ||
+      (data.dueDate !== undefined && data.dueDate !== current.dueDate) ||
+      (assigneeIds !== undefined && JSON.stringify([...new Set(assigneeIds)].sort()) !== JSON.stringify([...new Set(currentAssigneeIds)].sort()))) {
+    throw new TaskReportConflict('The project, deadline and assignee are managed by the visit report.')
+  }
+}
+export function assertTaskReportDeletion(hasReports: boolean) {
+  if (hasReports) throw new TaskReportConflict('Tasks linked to visit reports are retained as report history.')
+}
 
 export interface TaskFilters {
   propertyId?: string
@@ -17,6 +36,7 @@ export interface TaskFilters {
 }
 
 export interface TaskWithRelations extends Task {
+  visitReport?: { requestId: string; dueAt: Date; submittedAt: Date | null } | null
   vehicleRenewal?: { vehicleId: string; kind: string; expiryDate: string } | null
   propertyName: string | null
   assignees: { id: string; fullName: string }[]
@@ -74,6 +94,8 @@ async function hydrate(rows: Task[]): Promise<TaskWithRelations[]> {
     db.select({
       id: fleetTripReports.id,
       reportTaskId: fleetTripReports.taskId,
+      reportingTaskId: fleetTripReports.reportingTaskId,
+      linkedTaskId: fleetReportTaskLinks.taskId,
       requestId: fleetRequests.id,
       requestTaskId: fleetRequests.taskId,
       requestStatus: fleetRequests.status,
@@ -87,7 +109,8 @@ async function hydrate(rows: Task[]): Promise<TaskWithRelations[]> {
     })
       .from(fleetTripReports)
       .innerJoin(fleetRequests, eq(fleetTripReports.requestId, fleetRequests.id))
-      .where(or(inArray(fleetTripReports.taskId, ids), inArray(fleetRequests.taskId, ids)))
+      .leftJoin(fleetReportTaskLinks, eq(fleetReportTaskLinks.reportId, fleetTripReports.id))
+      .where(or(inArray(fleetTripReports.taskId, ids), inArray(fleetRequests.taskId, ids), inArray(fleetTripReports.reportingTaskId, ids), inArray(fleetReportTaskLinks.taskId, ids)))
       .orderBy(desc(fleetTripReports.createdAt)),
     db.select().from(vehicleRenewals).where(inArray(vehicleRenewals.taskId, ids)),
   ])
@@ -116,9 +139,10 @@ async function hydrate(rows: Task[]): Promise<TaskWithRelations[]> {
   )
   const reportsByTask = new Map<string, TaskWithRelations['fleetReports']>()
   for (const report of reportRows) {
-    const taskId = report.reportTaskId ?? report.requestTaskId
-    if (!taskId) continue
+    const associatedIds = new Set([report.reportTaskId, report.requestTaskId, report.reportingTaskId, report.linkedTaskId].filter((id): id is string => !!id && ids.includes(id)))
+    for (const taskId of associatedIds) {
     const list = reportsByTask.get(taskId) ?? []
+    if (list.some((existing) => existing.id === report.id)) continue
     list.push({
       id: report.id,
       requestId: report.requestId,
@@ -132,11 +156,16 @@ async function hydrate(rows: Task[]): Promise<TaskWithRelations[]> {
       attachmentUrls: report.attachmentUrls,
     })
     reportsByTask.set(taskId, list)
+    }
   }
 
   return rows.map((r) => ({
     ...r,
     vehicleRenewal: renewalRows.find(renewal => renewal.taskId === r.id) ?? null,
+    visitReport: (() => {
+      const report = reportRows.find(report => report.reportingTaskId === r.id)
+      return report ? { requestId: report.requestId, dueAt: report.dueAt, submittedAt: report.submittedAt } : null
+    })(),
     propertyName: r.propertyId ? propName.get(r.propertyId) ?? null : null,
     assignees: aByTask.get(r.id) ?? [],
     teams: tByTask.get(r.id) ?? [],
@@ -186,15 +215,23 @@ export async function createTask(data: NewTask, assigneeIds: string[], teamIds: 
 }
 
 export async function updateTask(
-  id: string, data: Partial<NewTask>, assigneeIds?: string[], teamIds?: string[],
+  id: string, data: Partial<NewTask>, assigneeIds?: string[], teamIds?: string[], orgId?: string,
 ): Promise<Task> {
   return db.transaction(async (tx) => {
+    const [current] = await tx.select().from(tasks).where(and(eq(tasks.id, id), orgId ? eq(tasks.orgId, orgId) : undefined)).for('update')
+    if (!current) throw new TaskReportConflict('Task not found.')
+    // Lock only the task. Submission locks the report first, then this task;
+    // a plain report read avoids an opposing lock order and deadlocks.
+    const [report] = await tx.select().from(fleetTripReports).where(and(eq(fleetTripReports.reportingTaskId, id), eq(fleetTripReports.orgId, current.orgId)))
+    const currentAssignees = report && assigneeIds !== undefined ? await tx.select().from(taskAssignees).where(eq(taskAssignees.taskId, id)) : []
+    assertVisitReportTaskEdit(current, report ?? null, data, currentAssignees.map(a => a.profileId), assigneeIds)
     const set: Partial<NewTask> = { ...data, updatedAt: new Date() }
-    if (data.status !== undefined) {
+    if (report) { delete set.projectId; delete set.dueDate; delete set.completedAt }
+    if (data.status !== undefined && !report) {
       set.completedAt = data.status === 'done' ? new Date() : null
     }
     const [task] = await tx.update(tasks).set(set).where(eq(tasks.id, id)).returning()
-    if (assigneeIds) {
+    if (assigneeIds && !report) {
       await tx.delete(taskAssignees).where(eq(taskAssignees.taskId, id))
       if (assigneeIds.length)
         await tx.insert(taskAssignees).values(assigneeIds.map((profileId) => ({ taskId: id, profileId })))
@@ -208,18 +245,23 @@ export async function updateTask(
   })
 }
 
-export async function deleteTask(id: string): Promise<Task | undefined> {
-  const [deleted] = await db.delete(tasks).where(eq(tasks.id, id)).returning()
-  return deleted
+export async function deleteTask(id: string, orgId?: string): Promise<Task | undefined> {
+  return db.transaction(async tx => {
+    const [current] = await tx.select().from(tasks).where(and(eq(tasks.id, id), orgId ? eq(tasks.orgId, orgId) : undefined)).for('update')
+    if (!current) return undefined
+    const [report] = await tx.select({ id: fleetTripReports.id }).from(fleetTripReports)
+      .leftJoin(fleetReportTaskLinks, eq(fleetReportTaskLinks.reportId, fleetTripReports.id))
+      .where(or(eq(fleetTripReports.taskId, id), eq(fleetTripReports.reportingTaskId, id), eq(fleetReportTaskLinks.taskId, id))).limit(1)
+    assertTaskReportDeletion(!!report)
+    const [deleted] = await tx.delete(tasks).where(eq(tasks.id, id)).returning()
+    return deleted
+  })
 }
 
 export async function reorderTask(
-  id: string, status: 'todo' | 'in_progress' | 'stuck' | 'done', position: number,
+  id: string, status: 'todo' | 'in_progress' | 'stuck' | 'done', position: number, orgId?: string,
 ): Promise<Task> {
-  const [task] = await db.update(tasks)
-    .set({ status, position, completedAt: status === 'done' ? new Date() : null, updatedAt: new Date() })
-    .where(eq(tasks.id, id)).returning()
-  return task
+  return updateTask(id, { status, position }, undefined, undefined, orgId)
 }
 
 export async function getTaskTeams(orgId: string): Promise<TaskTeam[]> {

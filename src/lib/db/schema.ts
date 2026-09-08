@@ -1595,6 +1595,7 @@ export const fleetRequests = pgTable('fleet_requests', {
   orgId: uuid('org_id').notNull().references(() => organizations.id),
   requestType: fleetRequestTypeEnum('request_type').notNull(),
   requestedBy: uuid('requested_by').notNull().references(() => profiles.id),
+  reportOwnerId: uuid('report_owner_id').references(() => profiles.id, { onDelete: 'restrict' }),
   targetPropertyId: uuid('target_property_id').references(() => properties.id, { onDelete: 'set null' }),
   originText: text('origin_text'),
   originKind: fleetOriginKindEnum('origin_kind').default('head_office').notNull(),
@@ -1645,7 +1646,9 @@ export const fleetTripReports = pgTable('fleet_trip_reports', {
   id: uuid('id').defaultRandom().primaryKey(),
   orgId: uuid('org_id').notNull().references(() => organizations.id),
   requestId: uuid('request_id').notNull().unique().references(() => fleetRequests.id, { onDelete: 'cascade' }),
-  taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+  reportingTaskId: uuid('reporting_task_id').unique().references(() => tasks.id, { onDelete: 'restrict' }),
+  details: jsonb('details').$type<Partial<import('../fleet/reports').VisitReportDetails>>().default({}).notNull(),
   submittedBy: uuid('submitted_by').notNull().references(() => profiles.id),
   dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
   submittedAt: timestamp('submitted_at', { withTimezone: true }),
@@ -1654,6 +1657,15 @@ export const fleetTripReports = pgTable('fleet_trip_reports', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
+
+export const fleetReportTaskLinks = pgTable('fleet_report_task_links', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id),
+  reportId: uuid('report_id').notNull().references(() => fleetTripReports.id, { onDelete: 'cascade' }),
+  taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'restrict' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, t => [unique('fleet_report_task_links_report_task_unique').on(t.reportId, t.taskId)])
 
 export const pushSubscriptions = pgTable('push_subscriptions', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -1707,6 +1719,7 @@ export const driverVehiclesRelations = relations(driverVehicles, ({ one }) => ({
 export const fleetRequestsRelations = relations(fleetRequests, ({ one, many }) => ({
   organization: one(organizations, { fields: [fleetRequests.orgId], references: [organizations.id] }),
   requester: one(profiles, { fields: [fleetRequests.requestedBy], references: [profiles.id] }),
+  reportOwner: one(profiles, { fields: [fleetRequests.reportOwnerId], references: [profiles.id] }),
   targetProperty: one(properties, {
     fields: [fleetRequests.targetPropertyId],
     references: [properties.id],
@@ -1715,10 +1728,19 @@ export const fleetRequestsRelations = relations(fleetRequests, ({ one, many }) =
   stops: many(dispatchStops),
 }))
 
-export const fleetTripReportsRelations = relations(fleetTripReports, ({ one }) => ({
+export const fleetTripReportsRelations = relations(fleetTripReports, ({ one, many }) => ({
+  organization: one(organizations, { fields: [fleetTripReports.orgId], references: [organizations.id] }),
   request: one(fleetRequests, { fields: [fleetTripReports.requestId], references: [fleetRequests.id] }),
   task: one(tasks, { fields: [fleetTripReports.taskId], references: [tasks.id] }),
+  reportingTask: one(tasks, { fields: [fleetTripReports.reportingTaskId], references: [tasks.id] }),
   submitter: one(profiles, { fields: [fleetTripReports.submittedBy], references: [profiles.id] }),
+  taskLinks: many(fleetReportTaskLinks),
+}))
+
+export const fleetReportTaskLinksRelations = relations(fleetReportTaskLinks, ({ one }) => ({
+  organization: one(organizations, { fields: [fleetReportTaskLinks.orgId], references: [organizations.id] }),
+  report: one(fleetTripReports, { fields: [fleetReportTaskLinks.reportId], references: [fleetTripReports.id] }),
+  task: one(tasks, { fields: [fleetReportTaskLinks.taskId], references: [tasks.id] }),
 }))
 
 export const dispatchesRelations = relations(dispatches, ({ one, many }) => ({

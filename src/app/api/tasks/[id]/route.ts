@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getProfile } from '@/lib/auth/guards'
-import { getTaskById, updateTask, deleteTask } from '@/lib/db/queries/tasks'
+import { getTaskById, updateTask, deleteTask, TaskReportConflict } from '@/lib/db/queries/tasks'
 
 type Ctx = { params: Promise<{ id: string }> }
 
@@ -55,9 +55,10 @@ export async function PATCH(request: NextRequest, context: Ctx) {
     // Never write vehicle-owned fields from the task form: a concurrent vehicle
     // update may already have changed them after the preflight read above.
     if (existing.vehicleRenewal) { delete data.dueDate; delete data.projectId }
-    const task = await updateTask(id, data, existing.vehicleRenewal ? undefined : assigneeIds ?? undefined, teamIds ?? undefined)
+    const task = await updateTask(id, data, existing.vehicleRenewal ? undefined : assigneeIds === null ? [] : assigneeIds, teamIds ?? undefined, profile.orgId)
     return NextResponse.json(task)
   } catch (error) {
+    if (error instanceof TaskReportConflict) return NextResponse.json({ error: error.message }, { status: 409 })
     console.error('PATCH /api/tasks/[id] error:', error)
     return NextResponse.json({ error: 'Failed to update' }, { status: 500 })
   }
@@ -72,11 +73,15 @@ export async function DELETE(_request: NextRequest, context: Ctx) {
     const task = await getTaskById(id)
     if (!task || task.orgId !== profile.orgId) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     if (task.vehicleRenewal) return NextResponse.json({ error: 'Renewal tasks are retained as vehicle history. Complete the task instead.' }, { status: 409 })
+    if (task.visitReport || task.fleetReports.length) return NextResponse.json({ error: 'Tasks linked to visit reports are retained as report history.' }, { status: 409 })
     if (profile.role !== 'admin' && task.createdBy !== profile.id)
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    const deleted = await deleteTask(id)
+    const deleted = await deleteTask(id, profile.orgId)
     return NextResponse.json(deleted)
   } catch (error) {
+    if (error instanceof TaskReportConflict) return NextResponse.json({ error: error.message }, { status: 409 })
+    const databaseError = error as { code?: string; cause?: { code?: string } }
+    if (databaseError?.code === '23503' || databaseError?.cause?.code === '23503') return NextResponse.json({ error: 'This task is retained by linked records and cannot be deleted.' }, { status: 409 })
     console.error('DELETE /api/tasks/[id] error:', error)
     return NextResponse.json({ error: 'Failed to delete' }, { status: 500 })
   }

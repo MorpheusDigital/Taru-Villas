@@ -36,6 +36,7 @@ const segmentLabels: Record<string, string> = {
   tasks: 'Task Manager',
   teams: 'Teams',
   fleet: 'Fleet',
+  reports: 'Visit Reports',
   dispatch: 'Dispatch',
   vehicles: 'Vehicles',
   drivers: 'Drivers',
@@ -86,7 +87,7 @@ function getBreadcrumbs(pathname: string): Breadcrumb[] {
         ? 'Details'
         : segmentLabels[segment] ?? formatSegment(segment)
 
-    crumbs.push({ label, href: currentPath })
+    crumbs.push({ label, href: currentPath === '/fleet/reports' ? '/fleet' : currentPath })
   }
 
   return crumbs

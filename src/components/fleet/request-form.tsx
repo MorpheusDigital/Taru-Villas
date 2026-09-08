@@ -38,6 +38,7 @@ async function parseErrorMessage(res: Response, fallback: string): Promise<strin
 }
 
 interface RequestFormValues {
+  reportOwnerId: string
   requestType: 'visit' | 'standalone'
   targetPropertyId: string
   originSelection: string
@@ -57,6 +58,8 @@ interface RequestFormValues {
 }
 
 interface RequestFormProps {
+  people: { id: string; fullName: string }[]
+  currentUserId: string
   request?: FleetRequestRow | null
   vehicles: Vehicle[]
   properties: Property[]
@@ -65,7 +68,7 @@ interface RequestFormProps {
   onSuccess?: () => void
 }
 
-export function RequestForm({ request, vehicles, properties, projects, eligibleTasks, onSuccess }: RequestFormProps) {
+export function RequestForm({ request, vehicles, properties, projects, eligibleTasks, people, currentUserId, onSuccess }: RequestFormProps) {
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const isEditing = !!request
@@ -80,6 +83,7 @@ export function RequestForm({ request, vehicles, properties, projects, eligibleT
     formState: { errors },
   } = useForm<RequestFormValues>({
     defaultValues: {
+      reportOwnerId: request?.reportOwnerId ?? request?.requestedBy ?? currentUserId,
       requestType: request?.requestType ?? 'visit',
       targetPropertyId: request?.targetPropertyId ?? '',
       // A hard-deleted origin property leaves origin_kind: 'property' but
@@ -198,6 +202,7 @@ export function RequestForm({ request, vehicles, properties, projects, eligibleT
     setIsSubmitting(true)
     try {
       const body = {
+        reportOwnerId: values.reportOwnerId,
         requestType: values.requestType,
         targetPropertyId: values.requestType === 'visit' ? values.targetPropertyId : null,
         originKind:
@@ -264,6 +269,17 @@ export function RequestForm({ request, vehicles, properties, projects, eligibleT
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+      <div className="space-y-2">
+        <Label>Visit report owner</Label>
+        <Controller control={control} name="reportOwnerId" rules={{ validate: (value) => people.some((person) => person.id === value) || 'Select an active report owner' }} render={({ field }) => (
+          <Select value={field.value} onValueChange={field.onChange}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select report owner" /></SelectTrigger>
+            <SelectContent>{people.map((person) => <SelectItem key={person.id} value={person.id}>{person.fullName}</SelectItem>)}</SelectContent>
+          </Select>
+        )} />
+        <p className="text-sm text-muted-foreground">This person must submit the visit report within 48 hours of trip completion.</p>
+        {errors.reportOwnerId && <p className="text-sm text-destructive">{errors.reportOwnerId.message}</p>}
+      </div>
       <Tabs
         value={requestType}
         onValueChange={(value) =>

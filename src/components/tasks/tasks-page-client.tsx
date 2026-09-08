@@ -100,7 +100,7 @@ export function TasksPageClient({
   }
 
   const canDelete = editingTask
-    ? !editingTask.vehicleRenewal && (isAdmin || editingTask.createdBy === currentUserId)
+    ? !editingTask.vehicleRenewal && !editingTask.visitReport && !editingTask.fleetReports.length && (isAdmin || editingTask.createdBy === currentUserId)
     : false
 
   async function handleDeleteProject() {

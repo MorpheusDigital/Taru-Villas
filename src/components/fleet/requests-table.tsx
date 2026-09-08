@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useQueryState } from 'nuqs'
 import {
   useReactTable,
@@ -59,7 +60,6 @@ import { formatTripRoute } from '@/lib/fleet/labels'
 import { getReportStatus, type TripReportStatus } from '@/lib/fleet/reports'
 import type { Property, Vehicle } from '@/lib/db/schema'
 import { RequestForm, type FleetRequestRow } from './request-form'
-import { TripReportDialog } from './trip-report-dialog'
 import type { FleetTaskReasonOption } from '@/lib/db/queries/dispatches'
 import type { ProjectWithCounts } from '@/lib/db/queries/projects'
 
@@ -145,7 +145,7 @@ function getRowReportStatus(r: FleetRequestRow): TripReportStatus | null {
 }
 
 function canSubmitTripReport(r: FleetRequestRow, currentUserId: string): boolean {
-  return r.status === 'completed' && r.requestedBy === currentUserId && getRowReportStatus(r) !== 'submitted'
+  return r.status === 'completed' && (r.tripReportOwnerId ?? r.reportOwnerId ?? r.requestedBy) === currentUserId && !!r.tripReportDueAt && getRowReportStatus(r) !== 'submitted'
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +157,6 @@ function createColumns(
   isFleetAdmin: boolean,
   onEdit: (r: FleetRequestRow) => void,
   onCancel: (r: FleetRequestRow) => void,
-  onSubmitReport: (r: FleetRequestRow) => void,
 ): ColumnDef<FleetRequestRow>[] {
   return [
     {
@@ -223,9 +222,10 @@ function createColumns(
         const reportStatus = getRowReportStatus(row.original)
         if (!reportStatus) return <span className="text-muted-foreground">—</span>
         return (
-          <Badge variant="outline" className={reportStatusColors[reportStatus]}>
-            {REPORT_STATUS_LABELS[reportStatus]}
-          </Badge>
+          <Link href={`/fleet/reports/${row.original.id}`} className="inline-flex flex-col gap-1">
+            <Badge variant="outline" className={reportStatusColors[reportStatus]}>{REPORT_STATUS_LABELS[reportStatus]}</Badge>
+            <span className="text-xs underline">{canSubmitTripReport(row.original, currentUserId) ? 'Submit report' : 'View report'}</span>
+          </Link>
         )
       },
     },
@@ -237,7 +237,7 @@ function createColumns(
         const editable = canEditRow(r, currentUserId, isFleetAdmin)
         const cancellable = canCancelRow(r, currentUserId, isFleetAdmin)
         const canSubmitReport = canSubmitTripReport(r, currentUserId)
-        if (!editable && !cancellable && !canSubmitReport) {
+        if (!editable && !cancellable && !r.tripReportDueAt) {
           return <span className="text-muted-foreground">—</span>
         }
         return (
@@ -256,10 +256,9 @@ function createColumns(
                 </DropdownMenuItem>
               )}
               {(editable || canSubmitReport) && cancellable && <DropdownMenuSeparator />}
-              {canSubmitReport && (
-                <DropdownMenuItem onClick={() => onSubmitReport(r)}>
-                  <FileText className="size-4" />
-                  Submit report
+              {r.tripReportDueAt && (
+                <DropdownMenuItem asChild>
+                  <Link href={`/fleet/reports/${r.id}`}><FileText className="size-4" />{canSubmitReport ? 'Submit report' : 'View report'}</Link>
                 </DropdownMenuItem>
               )}
               {editable && canSubmitReport && <DropdownMenuSeparator />}
@@ -282,6 +281,7 @@ function createColumns(
 // ---------------------------------------------------------------------------
 
 interface RequestsTableProps {
+  people: { id: string; fullName: string }[]
   requests: FleetRequestRow[]
   vehicles: Vehicle[]
   properties: Property[]
@@ -305,6 +305,7 @@ export function RequestsTable({
   properties,
   projects,
   eligibleTasks,
+  people,
   currentUserId,
   isFleetAdmin,
   canCreateRequest,
@@ -317,13 +318,12 @@ export function RequestsTable({
   const [createOpen, setCreateOpen] = useState(false)
   const [editRequest, setEditRequest] = useState<FleetRequestRow | null>(null)
   const [cancelTarget, setCancelTarget] = useState<FleetRequestRow | null>(null)
-  const [reportTarget, setReportTarget] = useState<FleetRequestRow | null>(null)
   const [isCanceling, setIsCanceling] = useState(false)
 
   const filtered = useMemo(() => {
     return requests.filter((r) => {
       if (status !== 'all' && r.status !== status) return false
-      if (isFleetAdmin && scope === 'mine' && r.requestedBy !== currentUserId) return false
+      if (isFleetAdmin && scope === 'mine' && r.requestedBy !== currentUserId && (r.tripReportOwnerId ?? r.reportOwnerId) !== currentUserId) return false
       return true
     })
   }, [requests, status, isFleetAdmin, scope, currentUserId])
@@ -334,10 +334,6 @@ export function RequestsTable({
 
   function handleCancelClick(r: FleetRequestRow) {
     setCancelTarget(r)
-  }
-
-  function handleSubmitReport(r: FleetRequestRow) {
-    setReportTarget(r)
   }
 
   async function handleCancel() {
@@ -359,7 +355,7 @@ export function RequestsTable({
   }
 
   const columns = useMemo(
-    () => createColumns(currentUserId, isFleetAdmin, handleEdit, handleCancelClick, handleSubmitReport),
+    () => createColumns(currentUserId, isFleetAdmin, handleEdit, handleCancelClick),
     [currentUserId, isFleetAdmin]
   )
 
@@ -513,6 +509,8 @@ export function RequestsTable({
             <DialogDescription>Raise a trip request for the fleet team.</DialogDescription>
           </DialogHeader>
           <RequestForm
+            people={people}
+            currentUserId={currentUserId}
             vehicles={vehicles}
             properties={properties}
             projects={projects}
@@ -531,6 +529,8 @@ export function RequestsTable({
           </DialogHeader>
           {editRequest && (
             <RequestForm
+              people={people}
+              currentUserId={currentUserId}
               request={editRequest}
               vehicles={vehicles}
               properties={properties}
@@ -561,15 +561,6 @@ export function RequestsTable({
         </AlertDialogContent>
       </AlertDialog>
 
-      <TripReportDialog
-        requestId={reportTarget?.id ?? null}
-        open={!!reportTarget}
-        onOpenChange={(open) => !open && setReportTarget(null)}
-        onSaved={() => {
-          setReportTarget(null)
-          router.refresh()
-        }}
-      />
     </div>
   )
 }

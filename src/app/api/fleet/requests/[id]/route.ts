@@ -6,12 +6,14 @@ import { getDriverById, listVehicles } from '@/lib/db/queries/fleet'
 import { validateFleetRequest } from '@/lib/fleet/constraints'
 import { notify } from '@/lib/fleet/push'
 import type { NewFleetRequest } from '@/lib/db/schema'
+import { VisitReportError } from '@/lib/db/queries/fleet-trip-reports'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://tvpl.morpheusds.com'
 
 const updateSchema = z.object({
+  reportOwnerId: z.string().uuid().optional(),
   targetPropertyId: z.string().uuid().nullable().optional(),
   originKind: z.enum(['head_office', 'property', 'other']).optional(),
   originPropertyId: z.string().uuid().nullable().optional(),
@@ -137,6 +139,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     // property onto a request whose type says it shouldn't have one — the
     // "mirror case" that pools/dispatches against the wrong location.
     const updatePayload: Partial<NewFleetRequest> = {
+      reportOwnerId: data.reportOwnerId,
       targetPropertyId: existing.requestType === 'visit' ? effectiveTargetPropertyId : null,
       originKind: effectiveOriginKind,
       originPropertyId: effectiveOriginKind === 'property' ? effectiveOriginPropertyId : null,
@@ -178,6 +181,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json(await updateRequest(id, updatePayload))
   } catch (error) {
+    if (error instanceof VisitReportError) return NextResponse.json({ error: error.message }, { status: 400 })
     console.error('PATCH /api/fleet/requests/[id] error:', error)
     return NextResponse.json({ error: 'Failed to update request' }, { status: 500 })
   }
@@ -228,12 +232,9 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
       )
     }
 
-    const result = await cancelRequest(id)
+    const result = await cancelRequest(id, isFleetAdmin)
     if (!result) {
-      // existing was just re-fetched above and passed every check, so this
-      // only fires on a genuine race (e.g. deleted between the checks and
-      // the write) — treat it the same as "not found" rather than 500.
-      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      return NextResponse.json({ error: 'The request changed and can no longer be cancelled. Refresh to see its current status.' }, { status: 409 })
     }
 
     // Best-effort, and run AFTER the cancellation has already committed —

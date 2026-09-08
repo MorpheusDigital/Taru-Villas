@@ -4,10 +4,12 @@ import { getProfile } from '@/lib/auth/guards'
 import { listVehicles } from '@/lib/db/queries/fleet'
 import { createRequestWithTaskReason, listRequests } from '@/lib/db/queries/dispatches'
 import { validateFleetRequest } from '@/lib/fleet/constraints'
+import { VisitReportError } from '@/lib/db/queries/fleet-trip-reports'
 
 const createSchema = z
   .object({
     requestType: z.enum(['visit', 'standalone']),
+    reportOwnerId: z.string().uuid().optional(),
     targetPropertyId: z.string().uuid().nullable().optional(),
     originKind: z.enum(['head_office', 'property', 'other']).default('head_office'),
     originPropertyId: z.string().uuid().nullable().optional(),
@@ -120,6 +122,7 @@ export async function POST(request: NextRequest) {
       orgId: profile.orgId,
       requestType: data.requestType,
       requestedBy: profile.id,
+      reportOwnerId: data.reportOwnerId ?? profile.id,
       targetPropertyId: data.requestType === 'visit' ? (data.targetPropertyId ?? null) : null,
       originKind: data.originKind,
       originPropertyId: data.originKind === 'property' ? (data.originPropertyId ?? null) : null,
@@ -134,6 +137,7 @@ export async function POST(request: NextRequest) {
     }, data.taskReason)
     return NextResponse.json(created, { status: 201 })
   } catch (error) {
+    if (error instanceof VisitReportError) return NextResponse.json({ error: error.message }, { status: 400 })
     console.error('POST /api/fleet/requests error:', error)
     if (
       error instanceof Error &&

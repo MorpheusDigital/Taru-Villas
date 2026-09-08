@@ -4,18 +4,33 @@ import { getProfile } from '@/lib/auth/guards'
 import {
   getTripReportForRequest,
   submitTripReport,
+  getVisitReportPage,
+  VisitReportError,
 } from '@/lib/db/queries/fleet-trip-reports'
+import { visitReportSubmissionSchema } from '@/lib/fleet/reports'
 
 type RouteContext = { params: Promise<{ requestId: string }> }
 
-const submitSchema = z.object({
-  summary: z.string().trim().min(1, 'Summary is required').max(5000),
-  attachmentUrls: z.array(z.string()).optional(),
-})
+const submitSchema = visitReportSubmissionSchema
+
+export async function GET(_request: NextRequest, context: RouteContext) {
+  try {
+    const profile = await getProfile()
+    if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
+    const { requestId } = await context.params
+    if (!z.uuid().safeParse(requestId).success) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    const result = await getVisitReportPage(requestId, profile.orgId, profile.id)
+    return result ? NextResponse.json(result) : NextResponse.json({ error: 'Not found' }, { status: 404 })
+  } catch {
+    return NextResponse.json({ error: 'Failed to load visit report' }, { status: 500 })
+  }
+}
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const { requestId } = await context.params
+    if (!z.uuid().safeParse(requestId).success) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     const profile = await getProfile()
     if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
@@ -34,14 +49,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const submitted = await submitTripReport(requestId, profile.id, {
-      summary: parsed.data.summary,
-      attachmentUrls: parsed.data.attachmentUrls ?? [],
-    })
+    const submitted = await submitTripReport(requestId, profile.orgId, profile.id, parsed.data)
     if (!submitted) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
     return NextResponse.json(submitted)
   } catch (error) {
+    if (error instanceof VisitReportError) return NextResponse.json({ error: error.message }, { status: 400 })
     console.error('POST /api/fleet/reports/[requestId] error:', error)
     return NextResponse.json({ error: 'Failed to submit trip report' }, { status: 500 })
   }

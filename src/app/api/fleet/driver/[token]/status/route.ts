@@ -8,14 +8,11 @@ import {
   markDispatchStarted,
   markStopArrived,
 } from '@/lib/db/queries/dispatches'
-import { ensureTripReportsForDispatch } from '@/lib/db/queries/fleet-trip-reports'
 import { notify } from '@/lib/fleet/push'
 
 export const dynamic = 'force-dynamic'
 
 type RouteContext = { params: Promise<{ token: string }> }
-
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://tvpl.morpheusds.com'
 
 const bodySchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('start'), dispatchId: z.string().uuid() }),
@@ -77,7 +74,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     // being read-then-discarded.
     const completed = await completeDispatch(body.dispatchId, driver.id)
     if (!completed) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    await ensureTripReportsForDispatch(body.dispatchId, completed.completedAt ?? new Date())
     const full = await getDispatchWithStops(body.dispatchId)
 
     // Notifications are best-effort and run AFTER completeDispatch has
@@ -97,15 +93,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
         // a requester with one cancelled stop and one live stop on the same
         // dispatch must still be notified for the live one, so a cancelled
         // stop must never occupy their slot in `notified`.
-        if (!req || req.status === 'cancelled' || notified.has(req.requestedBy)) continue
-        notified.add(req.requestedBy)
+        if (!req || req.status === 'cancelled') continue
+        const reportOwnerId = req.reportOwnerId ?? req.requestedBy
+        if (notified.has(reportOwnerId)) continue
+        notified.add(reportOwnerId)
         await notify({
           orgId: completed.orgId,
-          profileId: req.requestedBy,
+          profileId: reportOwnerId,
           type: 'trip_completed',
           title: 'Trip completed',
-          body: `${driver.fullName} has completed your trip. Please submit your trip report within 72 hours.`,
-          linkUrl: `${APP_URL}/fleet`,
+          body: `${driver.fullName} has completed your trip. Please submit your visit report within 48 hours.`,
+          linkUrl: `${request.nextUrl.origin}/fleet/reports/${req.id}`,
         })
       }
     } catch (notifyError) {

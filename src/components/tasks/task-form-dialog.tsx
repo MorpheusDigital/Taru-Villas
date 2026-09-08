@@ -248,6 +248,10 @@ export function TaskFormDialog({
               <Link className="font-medium underline underline-offset-2" href={`/fleet/vehicles/${task.vehicleRenewal.vehicleId}`}>View vehicle renewal details</Link>
               <p className="mt-1 text-muted-foreground">Expiry: {task.vehicleRenewal.expiryDate}. Dates and the Administration Manager are managed on the vehicle record.</p>
             </div>}
+            {task?.visitReport && <div className="rounded-md border p-3 text-sm">
+              <Link className="font-medium underline underline-offset-2" href={`/fleet/reports/${task.visitReport.requestId}`}>{task.visitReport.submittedAt ? 'View submitted visit report' : 'Open and submit visit report'}</Link>
+              <p className="mt-1 text-muted-foreground">Due {new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Colombo', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(task.visitReport.dueAt))} (Asia/Colombo). Submit the report to complete this task. The project, deadline and report owner are managed by the visit.</p>
+            </div>}
             {/* Title */}
             <div className="space-y-1.5">
               <Label htmlFor="task-title">
@@ -282,13 +286,13 @@ export function TaskFormDialog({
                   control={control}
                   name="status"
                   render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
+                    <Select value={field.value} onValueChange={field.onChange} disabled={!!task?.visitReport?.submittedAt}>
                       <SelectTrigger className="w-full">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         {STATUSES.map((s) => (
-                          <SelectItem key={s} value={s}>
+                          <SelectItem key={s} value={s} disabled={!!task?.visitReport && s === 'done'}>
                             {STATUS_META[s].label}
                           </SelectItem>
                         ))}
@@ -330,7 +334,7 @@ export function TaskFormDialog({
                 control={control}
                 name="projectId"
                 render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange} disabled={!!task?.vehicleRenewal}>
+                  <Select value={field.value} onValueChange={field.onChange} disabled={!!task?.vehicleRenewal || !!task?.visitReport}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select project" />
                     </SelectTrigger>
@@ -379,7 +383,7 @@ export function TaskFormDialog({
               <Input
                 id="task-due-date"
                 type="date"
-                readOnly={!!task?.vehicleRenewal}
+                readOnly={!!task?.vehicleRenewal || !!task?.visitReport}
                 {...register('dueDate')}
               />
             </div>
@@ -420,7 +424,7 @@ export function TaskFormDialog({
                           <div key={report.id} className="rounded-md border p-3 text-sm">
                             <div className="flex flex-wrap items-start justify-between gap-2">
                               <div>
-                                <p className="font-medium">Fleet request #{report.requestId.slice(0, 8)}</p>
+                                <Link href={`/fleet/reports/${report.requestId}`} className="font-medium underline">Visit report #{report.requestId.slice(0, 8)}</Link>
                                 <p className="text-xs text-muted-foreground capitalize">Request status: {report.requestStatus}</p>
                               </div>
                               <Badge variant="outline" className={status.className}>{status.label}</Badge>
@@ -429,12 +433,12 @@ export function TaskFormDialog({
                             <p className="mt-2 text-xs text-muted-foreground">
                               Trip: {format(new Date(report.startDate), 'd MMM yyyy')} – {format(new Date(report.endDate), 'd MMM yyyy')}
                             </p>
-                            <p className="text-xs text-muted-foreground">Due: {format(new Date(report.dueAt), 'd MMM yyyy, p')}</p>
+                            <p className="text-xs text-muted-foreground">Due: {new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Colombo', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(report.dueAt))} (Asia/Colombo)</p>
                             {report.submittedAt && <p className="text-xs text-muted-foreground">Submitted: {format(new Date(report.submittedAt), 'd MMM yyyy, p')}</p>}
                             {report.summary && <p className="mt-2 whitespace-pre-wrap">{report.summary}</p>}
                             {report.attachmentUrls.length > 0 && (
                               <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                                {report.attachmentUrls.map((url, index) => (
+                                {report.attachmentUrls.filter((url) => { try { return ['http:', 'https:'].includes(new URL(url).protocol) } catch { return false } }).map((url, index) => (
                                   <a key={url} href={url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
                                     Attachment {index + 1}
                                   </a>
@@ -459,7 +463,7 @@ export function TaskFormDialog({
                     type="button"
                     variant="outline"
                     className="w-full justify-start font-normal"
-                    disabled={!!task?.vehicleRenewal}
+                    disabled={!!task?.vehicleRenewal || !!task?.visitReport}
                   >
                     {multiLabel(assigneeIds.length, 'person', 'assignees')}
                   </Button>
