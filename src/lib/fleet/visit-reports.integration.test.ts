@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { and, eq } from 'drizzle-orm'
 import { db } from '../db'
 import { dispatches, dispatchStops, drivers, fleetRequests, fleetTripReports, fleetReportTaskLinks, profiles, projects, taskAssignees, tasks, vehicles } from '../db/schema'
-import { completeDispatchInTransaction, cancelRequestInTransaction, createManualDispatchInTransaction, updateRequestInTransaction } from '../db/queries/dispatches'
+import { completeDispatchInTransaction, cancelRequestInTransaction, createManualDispatchInTransaction, updateRequestInTransaction, listMyRidesInTransaction } from '../db/queries/dispatches'
 import { ensureTripReportsInTransaction, submitVisitReportInTransaction, saveVisitReportDraftInTransaction } from '../db/queries/fleet-trip-reports'
 
 describe.skipIf(process.env.RUN_VISIT_REPORT_DB_TESTS !== 'true')('visit report workflow (rollback only)', () => {
@@ -28,6 +28,15 @@ describe.skipIf(process.env.RUN_VISIT_REPORT_DB_TESTS !== 'true')('visit report 
         const early = await tx.select().from(fleetTripReports).where(eq(fleetTripReports.requestId, request.id))
         expect(early).toHaveLength(1)
         expect(early[0].dueAt).toBeNull()
+        const myRides = await listMyRidesInTransaction(tx, booker.orgId, owner.id)
+        expect(myRides.some(ride => ride.id === request.id)).toBe(true)
+        expect(myRides.some(ride => ride.id === unlinked.id || ride.id === cancelled.id)).toBe(false)
+        const myRide = myRides.find(ride => ride.id === request.id)!
+        expect(myRide.assignment?.vehicleName).toBe(vehicle.name)
+        expect(myRide.assignment?.driverName).toBe(driver.fullName)
+        expect(myRide.assignment).not.toHaveProperty('accessToken')
+        expect((await listMyRidesInTransaction(tx, booker.orgId, booker.id)).some(ride => ride.id === request.id)).toBe(true)
+        expect(await listMyRidesInTransaction(tx, crypto.randomUUID(), owner.id)).toEqual([])
         expect((await tx.select().from(tasks).where(eq(tasks.id, early[0].reportingTaskId!)))[0].dueDate).toBeNull()
         const draft = { summary: 'Initial observations', details: { visitPurpose: 'Inspection', visitLocation: 'Site', visitDate: '2026-09-08', outcomes: '' },
           linkedTaskIds: [reason.id], attachmentUrls: [], newTasks: [{ title: '', projectId: '', priority: 'medium' as const, assigneeIds: [], dueDate: null }] }

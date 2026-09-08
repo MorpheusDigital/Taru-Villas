@@ -60,7 +60,7 @@ import { formatTripRoute } from '@/lib/fleet/labels'
 import { getReportStatus, type TripReportStatus } from '@/lib/fleet/reports'
 import type { Property, Vehicle } from '@/lib/db/schema'
 import { RequestForm, type FleetRequestRow } from './request-form'
-import type { FleetTaskReasonOption } from '@/lib/db/queries/dispatches'
+import type { FleetTaskReasonOption, listMyRides } from '@/lib/db/queries/dispatches'
 import type { ProjectWithCounts } from '@/lib/db/queries/projects'
 
 const TYPE_LABELS: Record<FleetRequestRow['requestType'], string> = {
@@ -282,8 +282,9 @@ function createColumns(
 // ---------------------------------------------------------------------------
 
 interface RequestsTableProps {
+  personalView?: boolean
   people: { id: string; fullName: string }[]
-  requests: FleetRequestRow[]
+  requests: (FleetRequestRow & { assignment?: Awaited<ReturnType<typeof listMyRides>>[number]['assignment'] })[]
   vehicles: Vehicle[]
   properties: Property[]
   projects: ProjectWithCounts[]
@@ -301,6 +302,7 @@ interface RequestsTableProps {
 }
 
 export function RequestsTable({
+  personalView = false,
   requests,
   vehicles,
   properties,
@@ -315,6 +317,7 @@ export function RequestsTable({
 
   const [status, setStatus] = useQueryState('status', { defaultValue: 'all', shallow: false })
   const [scope, setScope] = useQueryState('scope', { defaultValue: 'mine', shallow: false })
+  const [view, setView] = useQueryState('view', { defaultValue: 'all', shallow: false })
 
   const [createOpen, setCreateOpen] = useState(false)
   const [editRequest, setEditRequest] = useState<FleetRequestRow | null>(null)
@@ -324,10 +327,13 @@ export function RequestsTable({
   const filtered = useMemo(() => {
     return requests.filter((r) => {
       if (status !== 'all' && r.status !== status) return false
+      if (personalView && view === 'upcoming' && (r.status === 'completed' || r.status === 'cancelled')) return false
+      if (personalView && view === 'completed' && r.status !== 'completed') return false
+      if (personalView && view === 'reports' && (!r.tripReportId || r.tripReportSubmittedAt || r.status === 'cancelled' || (r.tripReportOwnerId ?? r.reportOwnerId ?? r.requestedBy) !== currentUserId)) return false
       if (isFleetAdmin && scope === 'mine' && r.requestedBy !== currentUserId && (r.tripReportOwnerId ?? r.reportOwnerId) !== currentUserId) return false
       return true
     })
-  }, [requests, status, isFleetAdmin, scope, currentUserId])
+  }, [requests, status, isFleetAdmin, scope, currentUserId, personalView, view])
 
   function handleEdit(r: FleetRequestRow) {
     setEditRequest(r)
@@ -360,7 +366,7 @@ export function RequestsTable({
     [currentUserId, isFleetAdmin]
   )
 
-  const table = useReactTable({
+  const table = useReactTable<RequestsTableProps['requests'][number]>({
     data: filtered,
     columns,
     getCoreRowModel: getCoreRowModel(),
@@ -373,18 +379,23 @@ export function RequestsTable({
       {/* Page Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Fleet Requests</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{personalView ? 'My Rides' : 'Fleet Requests'}</h1>
           <p className="text-sm text-muted-foreground">
-            Raise a trip request and track it through to dispatch
+            {personalView ? 'Your requests, assigned trips and visit reports in one place.' : 'Raise a trip request and track it through to dispatch'}
           </p>
         </div>
         {canCreateRequest && (
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="size-4" />
-            New request
+            {personalView ? 'Request a ride' : 'New request'}
           </Button>
         )}
       </div>
+
+      {personalView && <div className="flex flex-wrap gap-2" aria-label="Ride views">
+        {([['all', 'All rides'], ['upcoming', 'Upcoming & active'], ['completed', 'Completed'], ['reports', 'Reports to submit']] as const).map(([value, label]) =>
+          <Button key={value} variant={view === value ? 'default' : 'outline'} size="sm" aria-pressed={view === value} onClick={() => { setView(value); setStatus('all') }}>{label}</Button>)}
+      </div>}
 
       {/* Filters */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -419,14 +430,49 @@ export function RequestsTable({
           <CarFront className="size-12 text-muted-foreground/50 mb-4" />
           <h3 className="text-lg font-medium mb-1">No trip requests yet</h3>
           <p className="text-sm text-muted-foreground mb-4">
-            Raise a request and the fleet team will assign a vehicle.
+            {canCreateRequest ? 'Request a ride and the fleet team will assign a vehicle.' : 'Trips appear here when someone books a ride for you. Contact the fleet team to arrange travel.'}
           </p>
           {canCreateRequest && (
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="size-4" />
-              New request
+              {personalView ? 'Request a ride' : 'New request'}
             </Button>
           )}
+        </div>
+      ) : personalView ? (
+        <div className="space-y-4">
+          {filtered.length === 0 && <p className="py-12 text-center text-muted-foreground">No rides match this view.</p>}
+          {table.getRowModel().rows.map(({ original: ride }) => {
+            const editable = canEditTripReport(ride, currentUserId)
+            const reportStatus = getRowReportStatus(ride)
+            const deadline = ride.tripReportDueAt ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Colombo', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(ride.tripReportDueAt)) : null
+            return <article key={ride.id} className="rounded-xl border bg-background p-5 sm:p-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className={statusColors[ride.status]}>{STATUS_LABELS[ride.status]}</Badge><span className="text-sm text-muted-foreground">{formatDayMonth(ride.startDate)}–{formatDayMonth(ride.endDate)}</span></div>
+                  <h2 className="break-words text-lg font-semibold">{formatTripRoute(ride)}</h2>
+                  {ride.purpose && <p className="max-w-prose break-words text-sm text-muted-foreground">{ride.purpose}</p>}
+                  <p className="text-sm text-muted-foreground">{ride.requestedBy === currentUserId ? 'Requested by you' : `Booked by ${ride.requesterName ?? 'your team'}`}{(ride.tripReportOwnerId ?? ride.reportOwnerId ?? ride.requestedBy) === currentUserId ? ' · You are the report owner' : ''}</p>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  {canEditRow(ride, currentUserId, false) && <Button size="sm" variant="outline" onClick={() => handleEdit(ride)}>Edit request</Button>}
+                  {canCancelRow(ride, currentUserId, false) && <Button size="sm" variant="ghost" onClick={() => handleCancelClick(ride)}>Cancel request</Button>}
+                </div>
+              </div>
+              <div className="mt-5 grid gap-4 border-t pt-4 sm:grid-cols-2">
+                <div className="space-y-1 text-sm">
+                  <p className="font-medium">{ride.assignment?.status === 'draft' ? 'Provisional assignment' : 'Vehicle & driver'}</p>
+                  {ride.assignment ? <><p>{ride.assignment.vehicleName}{ride.assignment.registrationNo ? ` (${ride.assignment.registrationNo})` : ''}</p><p className="text-muted-foreground">{ride.assignment.driverName}{ride.assignment.status === 'in_progress' ? ' · Trip in progress' : ''}</p></> : <p className="text-muted-foreground">{ride.status === 'cancelled' ? 'Request cancelled' : 'Awaiting assignment'}</p>}
+                </div>
+                <div className="space-y-2 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">Visit report</p>{reportStatus && <Badge variant="outline" className={reportStatusColors[reportStatus]}>{REPORT_STATUS_LABELS[reportStatus]}</Badge>}</div>
+                  <p className="text-muted-foreground">{ride.status === 'cancelled' ? 'No report required for this cancelled trip.' : !reportStatus ? 'Available as soon as a vehicle is assigned.' : deadline ? `Editing closes ${deadline} (Sri Lanka time).` : 'Start now; the deadline is 48 hours after trip completion.'}</p>
+                  {reportStatus && <Button asChild size="sm" variant={editable ? 'default' : 'outline'}><Link href={`/fleet/reports/${ride.id}`}><FileText className="size-4" />{editable ? ride.tripReportSubmittedAt ? 'Edit report' : 'Continue report' : 'View report'}</Link></Button>}
+                </div>
+              </div>
+            </article>
+          })}
+          {table.getPageCount() > 1 && <div className="flex items-center justify-between"><Button variant="outline" disabled={!table.getCanPreviousPage()} onClick={() => table.previousPage()}>Previous</Button><span className="text-sm">Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}</span><Button variant="outline" disabled={!table.getCanNextPage()} onClick={() => table.nextPage()}>Next</Button></div>}
         </div>
       ) : (
         <>

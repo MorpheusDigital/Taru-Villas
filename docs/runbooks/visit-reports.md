@@ -2,6 +2,13 @@
 
 ## Workflow
 
+Every active user can open **Fleet Management → My Rides** (`/fleet/my-rides`).
+This shows only rides they requested or are the designated report owner for,
+even for administrators. The page includes assignment details, status filters,
+report deadlines and direct report actions. Users with existing booking
+permission can request rides; others can track rides booked for them and edit
+their reports. Fleet-wide request and dispatch access remains unchanged.
+
 Choose the **Report owner / traveller** when requesting a ride. It defaults to
 the requester and must be an active person in the same organization. The owner
 can be changed while the request is pending.

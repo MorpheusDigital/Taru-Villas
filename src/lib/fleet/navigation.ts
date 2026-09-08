@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 
 export interface FleetNavigationItem {
-  title: 'Fleet' | 'Dispatch' | 'Vehicles' | 'Drivers' | 'Distances'
+  title: 'My Rides' | 'Fleet' | 'Dispatch' | 'Vehicles' | 'Drivers' | 'Distances'
   href: string
   icon: LucideIcon
 }
@@ -16,11 +16,10 @@ export function getFleetNavigationItems(
   canBookFleet: boolean,
   isFleetAdmin: boolean
 ): FleetNavigationItem[] {
-  if (!canBookFleet && !isFleetAdmin) return []
-
   const items: FleetNavigationItem[] = [
-    { title: 'Fleet', href: '/fleet', icon: Truck },
+    { title: 'My Rides', href: '/fleet/my-rides', icon: Route },
   ]
+  if (canBookFleet || isFleetAdmin) items.push({ title: 'Fleet', href: '/fleet', icon: Truck })
 
   if (!isFleetAdmin) return items
 

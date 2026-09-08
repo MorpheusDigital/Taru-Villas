@@ -36,6 +36,7 @@ const segmentLabels: Record<string, string> = {
   tasks: 'Task Manager',
   teams: 'Teams',
   fleet: 'Fleet',
+  'my-rides': 'My Rides',
   reports: 'Visit Reports',
   dispatch: 'Dispatch',
   vehicles: 'Vehicles',

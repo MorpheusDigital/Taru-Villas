@@ -25,6 +25,7 @@ import { ensureTripReportsInTransaction, VisitReportError } from './fleet-trip-r
 export async function listRequests(
   orgId: string,
   filters: { status?: 'pending' | 'queued' | 'dispatched' | 'completed' | 'cancelled'; requestedBy?: string } = {},
+  executor: typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0] = db,
 ) {
   const conditions = [eq(fleetRequests.orgId, orgId)]
   if (filters.status) conditions.push(eq(fleetRequests.status, filters.status))
@@ -32,7 +33,7 @@ export async function listRequests(
 
   const originProperty = alias(properties, 'origin_property')
 
-  return db
+  return executor
     .select({
       id: fleetRequests.id,
       requestType: fleetRequests.requestType,
@@ -82,6 +83,31 @@ export async function listRequests(
 export async function getRequestById(id: string) {
   const rows = await db.select().from(fleetRequests).where(eq(fleetRequests.id, id)).limit(1)
   return rows[0]
+}
+
+export async function listMyRides(orgId: string, userId: string) {
+  return db.transaction(tx => listMyRidesInTransaction(tx, orgId, userId))
+}
+
+export async function listMyRidesInTransaction(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], orgId: string, userId: string) {
+  // Always scoped to the signed-in traveller/booker, including administrators.
+  const requests = await listRequests(orgId, { requestedBy: userId }, tx)
+  const assignments = requests.length ? await tx.select({
+    requestId: dispatchStops.requestId,
+    dispatchId: dispatches.id,
+    status: dispatches.status,
+    vehicleName: vehicles.name,
+    registrationNo: vehicles.registrationNo,
+    driverName: drivers.fullName,
+  }).from(dispatchStops)
+    .innerJoin(dispatches, eq(dispatches.id, dispatchStops.dispatchId))
+    .innerJoin(vehicles, and(eq(vehicles.id, dispatches.vehicleId), eq(vehicles.orgId, orgId)))
+    .innerJoin(drivers, and(eq(drivers.id, dispatches.driverId), eq(drivers.orgId, orgId)))
+    .where(and(eq(dispatches.orgId, orgId), ne(dispatches.status, 'cancelled'), inArray(dispatchStops.requestId, requests.map(request => request.id))))
+    .orderBy(desc(dispatches.createdAt), desc(dispatches.id)) : []
+  return requests.map(request => ({ ...request,
+    assignment: assignments.find(assignment => assignment.requestId === request.id) ?? null,
+  })).sort((a, b) => b.startDate.localeCompare(a.startDate) || b.createdAt.getTime() - a.createdAt.getTime())
 }
 
 export async function createRequest(data: NewFleetRequest) {
