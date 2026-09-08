@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { reportDeadline, visitReportSubmissionSchema } from './reports'
+import { reportDeadline, visitReportSubmissionSchema, getReportStatus } from './reports'
 
 describe('visit report contract', () => {
+  it('does not mark an assigned trip overdue before the completion clock starts', () => {
+    expect(getReportStatus(null, null)).toBe('pending')
+  })
   it('sets a precise 48-hour deadline across a Colombo date boundary', () => {
     expect(reportDeadline(new Date('2026-09-08T20:30:00Z')).toISOString()).toBe('2026-09-10T20:30:00.000Z')
   })

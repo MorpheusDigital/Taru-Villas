@@ -30,13 +30,30 @@ export const visitReportSubmissionSchema = z.object({
 })
 export type VisitReportSubmission = z.infer<typeof visitReportSubmissionSchema>
 
+// Drafts preserve incomplete fields without creating linked/follow-up work.
+export const visitReportDraftSchema = visitReportSubmissionSchema.extend({
+  summary: z.string().trim().max(5000),
+  details: visitReportDetailsSchema.extend({
+    visitPurpose: z.string().trim().max(2000),
+    visitLocation: z.string().trim().max(1000),
+    visitDate: z.union([z.iso.date(), z.literal('')]),
+    outcomes: z.string().trim().max(5000),
+  }),
+  newTasks: z.array(visitReportSubmissionSchema.shape.newTasks.unwrap().element.extend({
+    title: z.string().trim().max(500),
+    projectId: z.union([z.uuid(), z.literal('')]),
+    assigneeIds: z.array(z.uuid()).max(20),
+  })).max(10).default([]),
+})
+export type VisitReportDraft = z.infer<typeof visitReportDraftSchema>
+
 export type TripReportStatus = 'pending' | 'submitted' | 'overdue'
 
 export function getReportStatus(
-  dueAt: Date,
+  dueAt: Date | null,
   submittedAt: Date | null,
   now = new Date()
 ): TripReportStatus {
   if (submittedAt) return 'submitted'
-  return now > dueAt ? 'overdue' : 'pending'
+  return dueAt && now > dueAt ? 'overdue' : 'pending'
 }

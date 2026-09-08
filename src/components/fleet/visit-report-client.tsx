@@ -37,18 +37,20 @@ interface ReportData {
     requestId: string
     taskId: string | null
     reportingTaskId: string | null
-    dueAt: string
+    dueAt: string | null
     submittedAt: string | null
     summary: string | null
     attachmentUrls: string[] | null
     details: Partial<ReportDetails> | null
+    draft: { summary: string; details: Partial<ReportDetails>; attachmentUrls: string[]; linkedTaskIds: string[]; newTasks: (Omit<FollowUpTask, 'dueDate'> & { dueDate: string | null })[] } | null
   }
-  request: { purpose: string | null; destinationText: string | null; startDate: string; endDate: string; targetPropertyId: string | null }
+  request: { purpose: string | null; destinationText: string | null; startDate: string; endDate: string; targetPropertyId: string | null; status: string }
   linkedTasks: { id: string; title: string; projectId: string }[]
   taskOptions: { id: string; title: string; projectId: string }[]
   projectOptions: { id: string; name: string }[]
   people: { id: string; fullName: string }[]
   canSubmit: boolean
+  canEdit: boolean
 }
 
 const emptyDetails: ReportDetails = { visitPurpose: '', visitLocation: '', visitDate: '', peopleMet: '', findings: '', outcomes: '', followUpActions: '' }
@@ -70,6 +72,7 @@ function colomboTime(value: string): string {
 }
 
 function visitDateInput(value: string): string {
+  if (!value) return ''
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
   const parts = new Intl.DateTimeFormat('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Asia/Colombo' }).formatToParts(new Date(value))
   const part = (type: string) => parts.find((item) => item.type === type)?.value ?? ''
@@ -92,6 +95,7 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
   const [linkedTaskIds, setLinkedTaskIds] = useState<string[]>([])
   const [newTasks, setNewTasks] = useState<FollowUpTask[]>([])
   const [pending, setPending] = useState(false)
+  const [savingDraft, setSavingDraft] = useState(false)
   const [reload, setReload] = useState(0)
 
   useEffect(() => {
@@ -103,11 +107,14 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
       .then((result) => {
         if (controller.signal.aborted) return
         setData(result)
-        setSummary(result.report.summary ?? '')
-        setDetails({ ...emptyDetails, visitPurpose: result.request.purpose ?? '', visitLocation: result.request.destinationText ?? '', ...result.report.details, visitDate: visitDateInput(result.report.details?.visitDate ?? result.request.endDate) })
-        setUrls(result.report.attachmentUrls?.length ? result.report.attachmentUrls : [''])
-        setLinkedTaskIds(result.linkedTasks.map((task) => task.id))
-        setNewTasks([])
+        const draft = result.report.submittedAt ? null : result.report.draft
+        const savedDetails = draft?.details ?? result.report.details
+        const savedUrls = draft?.attachmentUrls ?? result.report.attachmentUrls
+        setSummary(draft?.summary ?? result.report.summary ?? '')
+        setDetails({ ...emptyDetails, visitPurpose: result.request.purpose ?? '', visitLocation: result.request.destinationText ?? '', ...savedDetails, visitDate: visitDateInput(savedDetails?.visitDate ?? result.request.endDate) })
+        setUrls(savedUrls?.length ? savedUrls : [''])
+        setLinkedTaskIds(draft?.linkedTaskIds ?? result.linkedTasks.map((task) => task.id))
+        setNewTasks(draft?.newTasks.map((task) => ({ ...task, dueDate: task.dueDate ?? '' })) ?? [])
       })
       .catch((cause: unknown) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Unable to load visit report') })
     return () => controller.abort()
@@ -115,6 +122,28 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
 
   function updateTask(index: number, patch: Partial<FollowUpTask>) {
     setNewTasks((current) => current.map((task, i) => i === index ? { ...task, ...patch } : task))
+  }
+
+  async function saveDraft() {
+    if (!data?.canEdit || data.report.submittedAt || pending) return
+    const attachments = urls.map((url) => url.trim()).filter(Boolean)
+    if (attachments.length > 20 || attachments.some((url) => !safeUrl(url))) { toast.error('Use up to 20 valid HTTP or HTTPS supporting URLs.'); return }
+    setPending(true)
+    setSavingDraft(true)
+    try {
+      const res = await fetch(`/api/fleet/reports/${requestId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ summary, details, attachmentUrls: attachments, linkedTaskIds, newTasks: newTasks.map((task) => ({ ...task, dueDate: task.dueDate || null })) }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new Error(typeof body?.error === 'string' ? body.error : 'Failed to save draft')
+      }
+      toast.success('Visit report draft saved')
+      router.refresh()
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : 'Failed to save draft')
+    } finally { setPending(false); setSavingDraft(false) }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -144,7 +173,7 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
         throw new Error(typeof body?.error === 'string' ? body.error : 'Failed to submit visit report')
       }
       toast.success('Visit report submitted')
-      setData({ ...data, canSubmit: false, report: { ...data.report, submittedAt: new Date().toISOString(), summary, details, attachmentUrls: attachments } })
+      setData({ ...data, canEdit: false, canSubmit: false, report: { ...data.report, submittedAt: new Date().toISOString(), summary, details, attachmentUrls: attachments } })
       setReload((value) => value + 1)
       router.refresh()
     } catch (cause) {
@@ -155,17 +184,20 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
   if (error) return <div className="space-y-4"><h1 className="text-2xl font-semibold">Visit report</h1><p role="alert" className="text-destructive">{error}</p><Button variant="outline" onClick={() => setReload((value) => value + 1)}>Try again</Button></div>
   if (!data) return <p role="status" className="text-muted-foreground">Loading visit report…</p>
   const submitted = !!data.report.submittedAt
-  const readOnly = !data.canSubmit || submitted
-  const overdue = !submitted && new Date(data.report.dueAt) < new Date()
+  const cancelled = data.request.status === 'cancelled'
+  const readOnly = !data.canEdit || submitted || cancelled
+  const overdue = !submitted && !cancelled && !!data.report.dueAt && new Date(data.report.dueAt) < new Date()
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight">Visit report</h1>
-        <Badge variant={overdue ? 'destructive' : 'secondary'}>{submitted ? 'Submitted' : overdue ? 'Overdue' : 'Pending'}</Badge>
-        <p className="text-sm text-muted-foreground">Due {colomboTime(data.report.dueAt)} (Asia/Colombo){data.report.reportingTaskId ? ' · 48 hours after trip completion' : ' · Original reporting deadline'}</p>
+        <Badge variant={overdue ? 'destructive' : 'secondary'}>{cancelled ? 'Cancelled' : submitted ? 'Submitted' : overdue ? 'Overdue' : 'Draft'}</Badge>
+        {!cancelled && <p className="text-sm text-muted-foreground">{data.report.dueAt ? `Due ${colomboTime(data.report.dueAt)} (Asia/Colombo)${data.report.reportingTaskId ? ' · 48 hours after trip completion' : ' · Original reporting deadline'}` : 'Deadline starts after trip completion — due within 48h'}</p>}
+        {cancelled && <p className="text-sm text-muted-foreground">This trip was cancelled. The report is read-only.</p>}
         {submitted && <p className="text-sm text-muted-foreground">Submitted {colomboTime(data.report.submittedAt!)} (Asia/Colombo). This report is final.</p>}
-        {!submitted && !data.canSubmit && <p className="text-sm text-muted-foreground">Only the designated report owner can submit this report.</p>}
+        {!submitted && !cancelled && !data.canEdit && <p className="text-sm text-muted-foreground">Only the designated report owner can edit and submit this report.</p>}
+        {!submitted && !cancelled && data.canEdit && !data.canSubmit && <p className="text-sm text-muted-foreground">You can start drafting now. Submit the final report after the trip is completed.</p>}
       </div>
       <form onSubmit={submit} className="space-y-6">
         <Card>
@@ -215,7 +247,7 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
             <Button type="button" variant="outline" disabled={pending || newTasks.length >= 10 || !data.projectOptions.length || !data.people.length} onClick={() => setNewTasks([...newTasks, { title: '', description: '', projectId: '', assigneeIds: [], priority: 'medium', dueDate: '' }])}><Plus className="size-4" />Add follow-up task</Button>
           </CardContent>
         </Card>}
-        {!readOnly && <div className="space-y-2"><p className="text-sm text-muted-foreground">Submission is final. Review the report and follow-up tasks before submitting.</p><Button type="submit" disabled={pending}>{pending ? 'Submitting…' : 'Submit visit report'}</Button></div>}
+        {!readOnly && <div className="space-y-2"><p className="text-sm text-muted-foreground">Submission is final. Review the report and follow-up tasks before submitting.</p><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={pending} onClick={saveDraft}>{savingDraft ? 'Saving…' : 'Save draft'}</Button><Button type="submit" disabled={pending || !data.canSubmit}>{pending && !savingDraft ? 'Submitting…' : 'Submit visit report'}</Button></div></div>}
       </form>
     </div>
   )

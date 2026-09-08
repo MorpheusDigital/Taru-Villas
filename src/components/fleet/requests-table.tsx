@@ -140,12 +140,13 @@ function canCancelRow(r: FleetRequestRow, currentUserId: string, isFleetAdmin: b
 }
 
 function getRowReportStatus(r: FleetRequestRow): TripReportStatus | null {
-  if (!r.tripReportDueAt) return null
+  if (!r.tripReportId && !r.tripReportDueAt) return null
+  if (!r.tripReportDueAt) return r.tripReportSubmittedAt ? 'submitted' : 'pending'
   return getReportStatus(r.tripReportDueAt, r.tripReportSubmittedAt)
 }
 
-function canSubmitTripReport(r: FleetRequestRow, currentUserId: string): boolean {
-  return r.status === 'completed' && (r.tripReportOwnerId ?? r.reportOwnerId ?? r.requestedBy) === currentUserId && !!r.tripReportDueAt && getRowReportStatus(r) !== 'submitted'
+function canEditTripReport(r: FleetRequestRow, currentUserId: string): boolean {
+  return r.status !== 'cancelled' && (r.tripReportOwnerId ?? r.reportOwnerId ?? r.requestedBy) === currentUserId && !!(r.tripReportId || r.tripReportDueAt) && getRowReportStatus(r) !== 'submitted'
 }
 
 // ---------------------------------------------------------------------------
@@ -223,8 +224,8 @@ function createColumns(
         if (!reportStatus) return <span className="text-muted-foreground">—</span>
         return (
           <Link href={`/fleet/reports/${row.original.id}`} className="inline-flex flex-col gap-1">
-            <Badge variant="outline" className={reportStatusColors[reportStatus]}>{REPORT_STATUS_LABELS[reportStatus]}</Badge>
-            <span className="text-xs underline">{canSubmitTripReport(row.original, currentUserId) ? 'Submit report' : 'View report'}</span>
+            <Badge variant="outline" className={row.original.status === 'cancelled' ? statusColors.cancelled : reportStatusColors[reportStatus]}>{row.original.status === 'cancelled' ? 'Cancelled' : !row.original.tripReportDueAt && reportStatus !== 'submitted' ? 'Draft' : REPORT_STATUS_LABELS[reportStatus]}</Badge>
+            <span className="text-xs underline">{canEditTripReport(row.original, currentUserId) ? 'Continue draft' : 'Open report'}</span>
           </Link>
         )
       },
@@ -236,8 +237,8 @@ function createColumns(
         const r = row.original
         const editable = canEditRow(r, currentUserId, isFleetAdmin)
         const cancellable = canCancelRow(r, currentUserId, isFleetAdmin)
-        const canSubmitReport = canSubmitTripReport(r, currentUserId)
-        if (!editable && !cancellable && !r.tripReportDueAt) {
+        const canSubmitReport = canEditTripReport(r, currentUserId)
+        if (!editable && !cancellable && !r.tripReportId && !r.tripReportDueAt) {
           return <span className="text-muted-foreground">—</span>
         }
         return (
@@ -256,9 +257,9 @@ function createColumns(
                 </DropdownMenuItem>
               )}
               {(editable || canSubmitReport) && cancellable && <DropdownMenuSeparator />}
-              {r.tripReportDueAt && (
+              {(r.tripReportId || r.tripReportDueAt) && (
                 <DropdownMenuItem asChild>
-                  <Link href={`/fleet/reports/${r.id}`}><FileText className="size-4" />{canSubmitReport ? 'Submit report' : 'View report'}</Link>
+                  <Link href={`/fleet/reports/${r.id}`}><FileText className="size-4" />{canSubmitReport ? 'Continue draft' : 'Open report'}</Link>
                 </DropdownMenuItem>
               )}
               {editable && canSubmitReport && <DropdownMenuSeparator />}

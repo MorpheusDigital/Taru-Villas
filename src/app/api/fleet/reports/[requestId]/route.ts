@@ -6,12 +6,33 @@ import {
   submitTripReport,
   getVisitReportPage,
   VisitReportError,
+  saveVisitReportDraft,
 } from '@/lib/db/queries/fleet-trip-reports'
-import { visitReportSubmissionSchema } from '@/lib/fleet/reports'
+import { visitReportSubmissionSchema, visitReportDraftSchema } from '@/lib/fleet/reports'
 
 type RouteContext = { params: Promise<{ requestId: string }> }
 
 const submitSchema = visitReportSubmissionSchema
+
+export async function PATCH(request: NextRequest, context: RouteContext) {
+  try {
+    const profile = await getProfile()
+    if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!profile.isActive) return NextResponse.json({ error: 'Account is inactive' }, { status: 403 })
+    const { requestId } = await context.params
+    if (!z.uuid().safeParse(requestId).success) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    const report = await getTripReportForRequest(requestId, profile.orgId)
+    if (!report) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    if (report.submittedBy !== profile.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const parsed = visitReportDraftSchema.safeParse(await request.json().catch(() => null))
+    if (!parsed.success) return NextResponse.json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors }, { status: 400 })
+    return NextResponse.json(await saveVisitReportDraft(requestId, profile.orgId, profile.id, parsed.data))
+  } catch (error) {
+    if (error instanceof VisitReportError) return NextResponse.json({ error: error.message }, { status: 409 })
+    console.error('PATCH visit report draft failed:', error)
+    return NextResponse.json({ error: 'Failed to save draft' }, { status: 500 })
+  }
+}
 
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {

@@ -98,8 +98,10 @@ function multiLabel(count: number, singular: string, plural: string): string {
 }
 
 function reportStatus(report: TaskWithRelations['fleetReports'][number]) {
+  if (report.requestStatus === 'cancelled') return { label: 'Cancelled', className: 'bg-slate-100 text-slate-700 border-slate-200' }
   if (report.submittedAt) return { label: 'Submitted', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' }
-  if (new Date(report.dueAt) < new Date()) return { label: 'Overdue', className: 'bg-red-100 text-red-700 border-red-200' }
+  if (report.dueAt && new Date(report.dueAt) < new Date()) return { label: 'Overdue', className: 'bg-red-100 text-red-700 border-red-200' }
+  if (!report.dueAt) return { label: 'Draft', className: 'bg-amber-100 text-amber-700 border-amber-200' }
   return { label: 'Pending', className: 'bg-amber-100 text-amber-700 border-amber-200' }
 }
 
@@ -249,8 +251,8 @@ export function TaskFormDialog({
               <p className="mt-1 text-muted-foreground">Expiry: {task.vehicleRenewal.expiryDate}. Dates and the Administration Manager are managed on the vehicle record.</p>
             </div>}
             {task?.visitReport && <div className="rounded-md border p-3 text-sm">
-              <Link className="font-medium underline underline-offset-2" href={`/fleet/reports/${task.visitReport.requestId}`}>{task.visitReport.submittedAt ? 'View submitted visit report' : 'Open and submit visit report'}</Link>
-              <p className="mt-1 text-muted-foreground">Due {new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Colombo', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(task.visitReport.dueAt))} (Asia/Colombo). Submit the report to complete this task. The project, deadline and report owner are managed by the visit.</p>
+              <Link className="font-medium underline underline-offset-2" href={`/fleet/reports/${task.visitReport.requestId}`}>{task.visitReport.submittedAt ? 'View submitted visit report' : 'Open report'}</Link>
+              {task.visitReport.requestStatus === 'cancelled' ? <p className="mt-1 text-muted-foreground"><Badge variant="secondary">Cancelled</Badge> This trip was cancelled. The report is read-only.</p> : <p className="mt-1 text-muted-foreground">{task.visitReport.dueAt ? `Due ${new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Colombo', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(task.visitReport.dueAt))} (Asia/Colombo).` : 'Deadline starts after trip completion — due within 48h.'} {task.visitReport.submittedAt ? 'This report is final.' : 'You can save a draft now and submit after trip completion to complete this task.'} The project, deadline and report owner are managed by the visit.</p>}
             </div>}
             {/* Title */}
             <div className="space-y-1.5">
@@ -286,7 +288,7 @@ export function TaskFormDialog({
                   control={control}
                   name="status"
                   render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange} disabled={!!task?.visitReport?.submittedAt}>
+                    <Select value={field.value} onValueChange={field.onChange} disabled={!!task?.visitReport?.submittedAt || task?.visitReport?.requestStatus === 'cancelled'}>
                       <SelectTrigger className="w-full">
                         <SelectValue />
                       </SelectTrigger>
@@ -433,7 +435,7 @@ export function TaskFormDialog({
                             <p className="mt-2 text-xs text-muted-foreground">
                               Trip: {format(new Date(report.startDate), 'd MMM yyyy')} – {format(new Date(report.endDate), 'd MMM yyyy')}
                             </p>
-                            <p className="text-xs text-muted-foreground">Due: {new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Colombo', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(report.dueAt))} (Asia/Colombo)</p>
+                            {report.requestStatus !== 'cancelled' && <p className="text-xs text-muted-foreground">{report.dueAt ? `Due: ${new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Colombo', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(report.dueAt))} (Asia/Colombo)` : 'Deadline starts after trip completion — due within 48h'}</p>}
                             {report.submittedAt && <p className="text-xs text-muted-foreground">Submitted: {format(new Date(report.submittedAt), 'd MMM yyyy, p')}</p>}
                             {report.summary && <p className="mt-2 whitespace-pre-wrap">{report.summary}</p>}
                             {report.attachmentUrls.length > 0 && (

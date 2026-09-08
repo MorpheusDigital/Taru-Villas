@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { and, eq } from 'drizzle-orm'
 import { db } from '../db'
 import { dispatches, dispatchStops, drivers, fleetRequests, fleetTripReports, fleetReportTaskLinks, profiles, projects, taskAssignees, tasks, vehicles } from '../db/schema'
-import { completeDispatchInTransaction, cancelRequestInTransaction } from '../db/queries/dispatches'
-import { ensureTripReportsInTransaction, submitVisitReportInTransaction } from '../db/queries/fleet-trip-reports'
+import { completeDispatchInTransaction, cancelRequestInTransaction, createManualDispatchInTransaction, updateRequestInTransaction } from '../db/queries/dispatches'
+import { ensureTripReportsInTransaction, submitVisitReportInTransaction, saveVisitReportDraftInTransaction } from '../db/queries/fleet-trip-reports'
 
 describe.skipIf(process.env.RUN_VISIT_REPORT_DB_TESTS !== 'true')('visit report workflow (rollback only)', () => {
   it('completes rides and creates one 48-hour obligation for the traveller; submission closes only reporting task', async () => {
@@ -18,16 +18,39 @@ describe.skipIf(process.env.RUN_VISIT_REPORT_DB_TESTS !== 'true')('visit report 
         const [reason] = await tx.insert(tasks).values({ orgId: booker.orgId, projectId: project.id, title: 'Original work' }).returning()
         const [vehicle] = await tx.insert(vehicles).values({ orgId: booker.orgId, name: `Visit test ${crypto.randomUUID()}`, maxPassengers: 2 }).returning()
         const [driver] = await tx.insert(drivers).values({ orgId: booker.orgId, fullName: 'Visit test', accessToken: crypto.randomUUID().replaceAll('-', '') }).returning()
-        const [ride] = await tx.insert(dispatches).values({ orgId: booker.orgId, vehicleId: vehicle.id, driverId: driver.id, startDate: '2026-09-08', endDate: '2026-09-08', status: 'in_progress' }).returning()
         const [request] = await tx.insert(fleetRequests).values({ orgId: booker.orgId, requestType: 'standalone', requestedBy: booker.id, reportOwnerId: owner.id,
           destinationText: 'Inspection', startDate: '2026-09-08', endDate: '2026-09-08', status: 'dispatched', taskId: reason.id }).returning()
         const [unlinked, cancelled] = await tx.insert(fleetRequests).values([
           { orgId: booker.orgId, requestType: 'standalone', requestedBy: booker.id, destinationText: 'Second visit', startDate: '2026-09-08', endDate: '2026-09-08', status: 'dispatched' },
           { orgId: booker.orgId, requestType: 'standalone', requestedBy: booker.id, destinationText: 'Cancelled visit', startDate: '2026-09-08', endDate: '2026-09-08', status: 'cancelled' },
         ]).returning()
-        await tx.insert(dispatchStops).values([request, request, unlinked, cancelled].map(r => ({ dispatchId: ride.id, requestId: r.id }))).returning()
+        const ride = await createManualDispatchInTransaction(tx, booker.orgId, { vehicleId: vehicle.id, driverId: driver.id, startDate: '2026-09-08', endDate: '2026-09-08', requestIds: [request.id, unlinked.id, cancelled.id] })
+        const early = await tx.select().from(fleetTripReports).where(eq(fleetTripReports.requestId, request.id))
+        expect(early).toHaveLength(1)
+        expect(early[0].dueAt).toBeNull()
+        expect((await tx.select().from(tasks).where(eq(tasks.id, early[0].reportingTaskId!)))[0].dueDate).toBeNull()
+        const draft = { summary: 'Initial observations', details: { visitPurpose: 'Inspection', visitLocation: 'Site', visitDate: '2026-09-08', outcomes: '' },
+          linkedTaskIds: [reason.id], attachmentUrls: [], newTasks: [{ title: '', projectId: '', priority: 'medium' as const, assigneeIds: [], dueDate: null }] }
+        await expect(saveVisitReportDraftInTransaction(tx, request.id, booker.orgId, booker.id, draft)).rejects.toThrow('report owner')
+        await saveVisitReportDraftInTransaction(tx, request.id, booker.orgId, owner.id, draft)
+        // A removed assignment permits edits: responsibility and generated defaults follow them.
+        await tx.update(fleetRequests).set({ status: 'pending' }).where(eq(fleetRequests.id, request.id))
+        await updateRequestInTransaction(tx, request.id, { reportOwnerId: booker.id, destinationText: 'Updated destination', purpose: 'Updated purpose' })
+        const [reassigned] = await tx.select().from(fleetTripReports).where(eq(fleetTripReports.requestId, request.id))
+        expect(reassigned.submittedBy).toBe(booker.id)
+        expect(reassigned.details?.visitLocation).toBe('Updated destination')
+        expect(reassigned.draft).toEqual(draft)
+        expect(await tx.select({ id: taskAssignees.profileId }).from(taskAssignees).where(eq(taskAssignees.taskId, reassigned.reportingTaskId!))).toEqual([{ id: booker.id }])
+        await expect(saveVisitReportDraftInTransaction(tx, request.id, booker.orgId, owner.id, draft)).rejects.toThrow('report owner')
+        await updateRequestInTransaction(tx, request.id, { reportOwnerId: owner.id })
+        await tx.update(fleetRequests).set({ status: 'queued' }).where(eq(fleetRequests.id, request.id))
+        await ensureTripReportsInTransaction(tx, ride.id)
+        expect((await tx.select().from(fleetTripReports).where(eq(fleetTripReports.requestId, request.id)))[0].draft).toEqual(draft)
+        await expect(submitVisitReportInTransaction(tx, request.id, booker.orgId, owner.id, { ...draft, details: { ...draft.details, outcomes: 'Finished' }, newTasks: [] })).rejects.toThrow('completed')
+        await tx.update(dispatches).set({ status: 'in_progress' }).where(eq(dispatches.id, ride.id)).returning()
+        await tx.insert(dispatchStops).values({ dispatchId: ride.id, requestId: request.id }).returning()
         expect(await completeDispatchInTransaction(tx, ride.id, crypto.randomUUID())).toBeUndefined()
-        expect(await tx.select().from(fleetTripReports).where(eq(fleetTripReports.requestId, request.id))).toHaveLength(0)
+        expect(await tx.select().from(fleetTripReports).where(eq(fleetTripReports.requestId, request.id))).toHaveLength(1)
         const completed = await completeDispatchInTransaction(tx, ride.id, driver.id, new Date('2026-09-08T20:30:00Z'))
         expect(completed?.status).toBe('completed')
         // A stale cancellation preflight must not reverse a completed ride.
@@ -36,7 +59,9 @@ describe.skipIf(process.env.RUN_VISIT_REPORT_DB_TESTS !== 'true')('visit report 
         const reports = await tx.select().from(fleetTripReports).where(eq(fleetTripReports.requestId, request.id))
         expect(reports).toHaveLength(1)
         const report = reports[0]
-        expect(report.dueAt.toISOString()).toBe('2026-09-10T20:30:00.000Z')
+        expect(report.id).toBe(early[0].id)
+        expect(report.draft).toEqual(draft)
+        expect(report.dueAt!.toISOString()).toBe('2026-09-10T20:30:00.000Z')
         expect(report.submittedBy).toBe(owner.id)
         expect(report.reportingTaskId).not.toBe(reason.id)
         const [unlinkedReport] = await tx.select().from(fleetTripReports).where(eq(fleetTripReports.requestId, unlinked.id))
@@ -55,6 +80,7 @@ describe.skipIf(process.env.RUN_VISIT_REPORT_DB_TESTS !== 'true')('visit report 
         await expect(submitVisitReportInTransaction(tx, request.id, booker.orgId, owner.id, { ...data, newTasks: [{ ...data.newTasks[0], projectId: crypto.randomUUID() }] })).rejects.toThrow('active project')
         await expect(submitVisitReportInTransaction(tx, request.id, booker.orgId, owner.id, { ...data, newTasks: [{ ...data.newTasks[0], assigneeIds: [crypto.randomUUID()] }] })).rejects.toThrow('active assignees')
         await submitVisitReportInTransaction(tx, request.id, booker.orgId, owner.id, data)
+        await expect(saveVisitReportDraftInTransaction(tx, request.id, booker.orgId, owner.id, draft)).rejects.toThrow('Submitted')
         await submitVisitReportInTransaction(tx, request.id, booker.orgId, owner.id, data)
         expect((await tx.select().from(tasks).where(eq(tasks.id, report.reportingTaskId!)))[0].status).toBe('done')
         expect((await tx.select().from(tasks).where(eq(tasks.id, reason.id)))[0].status).toBe('todo')

@@ -39,6 +39,7 @@ export async function listRequests(
       requestedBy: fleetRequests.requestedBy,
       reportOwnerId: fleetRequests.reportOwnerId,
       tripReportOwnerId: fleetTripReports.submittedBy,
+      tripReportId: fleetTripReports.id,
       requesterName: profiles.fullName,
       // Needed client-side by the dispatch editor's mirror of
       // validateVehicleForCluster's restricted-vehicle rule — without it,
@@ -175,7 +176,10 @@ export async function createRequestWithTaskReason(
 }
 
 export async function updateRequest(id: string, data: Partial<NewFleetRequest>) {
-  return db.transaction(async tx => {
+  return db.transaction(tx => updateRequestInTransaction(tx, id, data))
+}
+
+export async function updateRequestInTransaction(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], id: string, data: Partial<NewFleetRequest>) {
     const [existing] = await tx.select().from(fleetRequests).where(eq(fleetRequests.id, id)).for('update')
     if (!existing || existing.status !== 'pending') throw new VisitReportError('Only pending requests can be edited')
     if (data.reportOwnerId) {
@@ -183,8 +187,26 @@ export async function updateRequest(id: string, data: Partial<NewFleetRequest>) 
       if (!owner) throw new VisitReportError('Choose an active report owner in your organization')
     }
     const [updated] = await tx.update(fleetRequests).set({ ...data, updatedAt: new Date() }).where(eq(fleetRequests.id, id)).returning()
+    const [report] = await tx.select().from(fleetTripReports).where(eq(fleetTripReports.requestId, id)).for('update')
+    if (report && !report.submittedAt) {
+      const ownerId = updated.reportOwnerId ?? updated.requestedBy
+      const [property] = updated.targetPropertyId ? await tx.select().from(properties).where(and(eq(properties.id, updated.targetPropertyId), eq(properties.orgId, updated.orgId))) : []
+      await tx.update(fleetTripReports).set({ submittedBy: ownerId,
+        details: { visitPurpose: updated.purpose ?? '', visitLocation: property?.name ?? updated.destinationText ?? '', visitDate: updated.endDate },
+        updatedAt: new Date(),
+      }).where(eq(fleetTripReports.id, report.id)).returning()
+      // Keep the traveller's saved draft intact; only generated defaults change.
+      if (report.reportingTaskId) {
+        await tx.update(tasks).set({ propertyId: property?.id ?? null,
+          title: `Submit visit report — ${(property?.name ?? updated.destinationText ?? 'Ride').slice(0, 200)} (${id.slice(0, 8)})`, updatedAt: new Date(),
+        }).where(eq(tasks.id, report.reportingTaskId)).returning()
+        if (report.submittedBy !== ownerId) {
+          await tx.delete(taskAssignees).where(eq(taskAssignees.taskId, report.reportingTaskId)).returning()
+          await tx.insert(taskAssignees).values({ taskId: report.reportingTaskId, profileId: ownerId }).returning()
+        }
+      }
+    }
     return updated
-  })
 }
 
 /**
@@ -241,6 +263,11 @@ export async function cancelRequestInTransaction(tx: Parameters<Parameters<typeo
     if (affected.length > 0) {
       await tx.delete(dispatchStops).where(eq(dispatchStops.requestId, id)).returning()
     }
+
+    const [report] = await tx.select().from(fleetTripReports).where(eq(fleetTripReports.requestId, id))
+    if (report?.reportingTaskId) await tx.update(tasks).set({ status: 'done', completedAt: new Date(), dueDate: null,
+      description: `Trip cancelled — no visit report required. Draft retained for reference.\nReport: /fleet/reports/${id}`, updatedAt: new Date() })
+      .where(eq(tasks.id, report.reportingTaskId)).returning()
 
     return {
       request: updated,
@@ -528,6 +555,7 @@ export async function replaceDraftDispatches(orgId: string, result: EngineResult
         )
         .returning()
 
+      await ensureTripReportsInTransaction(tx, dispatch.id)
       created.push(dispatch.id)
     }
 
@@ -632,6 +660,7 @@ export async function approveDispatch(id: string, approvedBy: string) {
         .returning()
     }
 
+    await ensureTripReportsInTransaction(tx, id)
     return updated
   })
 }
@@ -647,7 +676,13 @@ export async function createManualDispatch(
     notes?: string | null
   },
 ) {
-  return db.transaction(async (tx) => {
+  return db.transaction(tx => createManualDispatchInTransaction(tx, orgId, data))
+}
+
+export async function createManualDispatchInTransaction(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0], orgId: string,
+  data: Parameters<typeof createManualDispatch>[1],
+) {
     const [dispatch] = await tx
       .insert(dispatches)
       .values({
@@ -705,8 +740,8 @@ export async function createManualDispatch(
       }
     }
 
+    await ensureTripReportsInTransaction(tx, dispatch.id)
     return dispatch
-  })
 }
 
 /**
@@ -905,6 +940,7 @@ export async function updateDraftDispatch(
       }
     }
 
+    await ensureTripReportsInTransaction(tx, id)
     return updated
   })
 }

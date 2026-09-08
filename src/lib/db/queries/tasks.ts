@@ -9,12 +9,13 @@ import {
 export class TaskReportConflict extends Error {}
 export function assertVisitReportTaskEdit(
   current: Pick<Task, 'status' | 'projectId' | 'dueDate'>,
-  report: { submittedAt: Date | null } | null,
+  report: { submittedAt: Date | null; requestStatus?: string } | null,
   data: Partial<NewTask>, currentAssigneeIds: string[], assigneeIds?: string[],
 ) {
   if (!report) return
+  if (report.requestStatus === 'cancelled' && data.status !== undefined && data.status !== 'done') throw new TaskReportConflict('The trip was cancelled; no report is required.')
   if (report.submittedAt && data.status !== undefined && data.status !== 'done') throw new TaskReportConflict('A submitted visit report cannot be reopened.')
-  if (!report.submittedAt && data.status === 'done') throw new TaskReportConflict('Submit the visit report to complete this task.')
+  if (!report.submittedAt && report.requestStatus !== 'cancelled' && data.status === 'done') throw new TaskReportConflict('Submit the visit report to complete this task.')
   if ((data.projectId !== undefined && data.projectId !== current.projectId) ||
       (data.dueDate !== undefined && data.dueDate !== current.dueDate) ||
       (assigneeIds !== undefined && JSON.stringify([...new Set(assigneeIds)].sort()) !== JSON.stringify([...new Set(currentAssigneeIds)].sort()))) {
@@ -36,7 +37,7 @@ export interface TaskFilters {
 }
 
 export interface TaskWithRelations extends Task {
-  visitReport?: { requestId: string; dueAt: Date; submittedAt: Date | null } | null
+  visitReport?: { requestId: string; dueAt: Date | null; submittedAt: Date | null; requestStatus?: string } | null
   vehicleRenewal?: { vehicleId: string; kind: string; expiryDate: string } | null
   propertyName: string | null
   assignees: { id: string; fullName: string }[]
@@ -55,7 +56,7 @@ export interface TaskWithRelations extends Task {
     purpose: string | null
     startDate: string
     endDate: string
-    dueAt: Date
+    dueAt: Date | null
     submittedAt: Date | null
     summary: string | null
     attachmentUrls: string[]
@@ -164,7 +165,7 @@ async function hydrate(rows: Task[]): Promise<TaskWithRelations[]> {
     vehicleRenewal: renewalRows.find(renewal => renewal.taskId === r.id) ?? null,
     visitReport: (() => {
       const report = reportRows.find(report => report.reportingTaskId === r.id)
-      return report ? { requestId: report.requestId, dueAt: report.dueAt, submittedAt: report.submittedAt } : null
+      return report ? { requestId: report.requestId, dueAt: report.dueAt, submittedAt: report.submittedAt, requestStatus: report.requestStatus } : null
     })(),
     propertyName: r.propertyId ? propName.get(r.propertyId) ?? null : null,
     assignees: aByTask.get(r.id) ?? [],
@@ -222,7 +223,9 @@ export async function updateTask(
     if (!current) throw new TaskReportConflict('Task not found.')
     // Lock only the task. Submission locks the report first, then this task;
     // a plain report read avoids an opposing lock order and deadlocks.
-    const [report] = await tx.select().from(fleetTripReports).where(and(eq(fleetTripReports.reportingTaskId, id), eq(fleetTripReports.orgId, current.orgId)))
+    const [report] = await tx.select({ submittedAt: fleetTripReports.submittedAt, requestStatus: fleetRequests.status }).from(fleetTripReports)
+      .innerJoin(fleetRequests, eq(fleetRequests.id, fleetTripReports.requestId))
+      .where(and(eq(fleetTripReports.reportingTaskId, id), eq(fleetTripReports.orgId, current.orgId)))
     const currentAssignees = report && assigneeIds !== undefined ? await tx.select().from(taskAssignees).where(eq(taskAssignees.taskId, id)) : []
     assertVisitReportTaskEdit(current, report ?? null, data, currentAssignees.map(a => a.profileId), assigneeIds)
     const set: Partial<NewTask> = { ...data, updatedAt: new Date() }

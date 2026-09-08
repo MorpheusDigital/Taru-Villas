@@ -6,16 +6,20 @@ Choose the **Report owner / traveller** when requesting a ride. It defaults to
 the requester and must be an active person in the same organization. The owner
 can be changed while the request is pending.
 
-When the driver completes a dispatch, each non-cancelled request receives its
+When a vehicle is assigned, each non-cancelled request receives its
 own visit report and a high-priority task in the **Visit Reports** project.
-Creation is part of the completion transaction. Multiple stops for the same
+Creation is part of the assignment transaction, including draft dispatches. Multiple stops for the same
 request do not create duplicates, and a ride without an original task still
 receives a reporting task.
 
 The task is assigned to the designated traveller and is due **48 elapsed hours**
 after completion. The full deadline is shown in Asia/Colombo time on the report
 and task description; Task Manager's date column shows its local calendar date.
-No cron job is required for creation.
+Until completion the deadline is unset. No cron job is required for creation.
+The traveller can save partial drafts immediately, but final submission is only
+available after completion. Reassignments retain the report and its draft;
+pending-request owner changes transfer the reporting task too. Cancellation
+closes the obligation and retains its read-only draft for reference.
 
 Open the report from Fleet Management or its Task Manager task. The designated
 traveller records the purpose, location, date, work done and outcomes, with
@@ -36,14 +40,15 @@ only the assigned report owner may submit one.
 ## Deployment and verification
 
 Apply `drizzle/0030_fleet_visit_report_tasks.sql` transactionally before deploying
-this code. It is additive except for making the original task link nullable and
+this code, followed by `drizzle/0031_visit_report_assignment_drafts.sql` (nullable
+deadline and saved draft payload). The first migration is additive except for making the original task link nullable and
 changing its delete action to SET NULL. New report-task and linked-task foreign
 keys retain task history. The new link table has RLS enabled; access is through
 the application's organization-scoped server queries.
 
 Existing reports, their deadlines and submitted content are retained. Historical
 rides are not backfilled with new tasks. The 48-hour rule applies to reports
-created by completions after this release.
+created by assignments after this release, with completion as a fallback for older assignments.
 
 Run `npm test`, `npx tsc --noEmit` and `npm run build`. To exercise the full workflow
 against a migrated database, set the connection variables securely and run:
