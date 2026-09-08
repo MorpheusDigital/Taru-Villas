@@ -30,7 +30,14 @@ Before final submission, link up to 20 existing organization tasks or create up
 to 10 follow-up tasks with a project, assignees, priority and optional due date.
 The original ride-related task remains linked. Submitting completes only the
 generated reporting task; all original and follow-up task statuses are preserved.
-Submission is final. A repeated submission does not create duplicate tasks.
+The report remains editable by its owner until exactly 48 hours after trip
+completion, including after submission; then all saves and initial submissions
+are rejected server-side. An unsubmitted report remains overdue, not silently
+submitted. Revisions preserve the original submission timestamp and completed
+reporting task. A repeated submission does not create duplicate tasks.
+After submission, use **Save changes** for report content and additional links.
+Existing links are retained; create additional follow-up tasks in Task Manager
+and link them to the report. Revisions never create follow-up tasks themselves.
 
 Report tasks cannot be manually marked done, reopened after submission,
 reassigned, moved to another project or given a different deadline. Tasks with

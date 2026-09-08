@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { reportDeadline, visitReportSubmissionSchema, getReportStatus } from './reports'
+import { reportDeadline, visitReportSubmissionSchema, getReportStatus, isReportEditingOpen } from './reports'
 
 describe('visit report contract', () => {
+  it('allows editing before completion and locks at the precise deadline', () => {
+    const deadline = new Date('2026-09-10T20:30:00Z')
+    expect(isReportEditingOpen(null, new Date('2030-01-01'))).toBe(true)
+    expect(isReportEditingOpen(deadline, new Date('2026-09-10T20:29:59.999Z'))).toBe(true)
+    expect(isReportEditingOpen(deadline, new Date('2026-09-10T20:30:00Z'))).toBe(false)
+    expect(isReportEditingOpen(deadline, new Date('2026-09-10T20:30:00.001Z'))).toBe(false)
+  })
   it('does not mark an assigned trip overdue before the completion clock starts', () => {
     expect(getReportStatus(null, null)).toBe('pending')
   })

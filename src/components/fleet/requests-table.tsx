@@ -146,7 +146,7 @@ function getRowReportStatus(r: FleetRequestRow): TripReportStatus | null {
 }
 
 function canEditTripReport(r: FleetRequestRow, currentUserId: string): boolean {
-  return r.status !== 'cancelled' && (r.tripReportOwnerId ?? r.reportOwnerId ?? r.requestedBy) === currentUserId && !!(r.tripReportId || r.tripReportDueAt) && getRowReportStatus(r) !== 'submitted'
+  return r.status !== 'cancelled' && (r.tripReportOwnerId ?? r.reportOwnerId ?? r.requestedBy) === currentUserId && !!(r.tripReportId || r.tripReportDueAt) && (!r.tripReportDueAt || new Date(r.tripReportDueAt).getTime() > Date.now())
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +225,7 @@ function createColumns(
         return (
           <Link href={`/fleet/reports/${row.original.id}`} className="inline-flex flex-col gap-1">
             <Badge variant="outline" className={row.original.status === 'cancelled' ? statusColors.cancelled : reportStatusColors[reportStatus]}>{row.original.status === 'cancelled' ? 'Cancelled' : !row.original.tripReportDueAt && reportStatus !== 'submitted' ? 'Draft' : REPORT_STATUS_LABELS[reportStatus]}</Badge>
-            <span className="text-xs underline">{canEditTripReport(row.original, currentUserId) ? 'Continue draft' : 'Open report'}</span>
+            <span className="text-xs underline">{canEditTripReport(row.original, currentUserId) ? row.original.tripReportSubmittedAt ? 'Edit report' : 'Continue draft' : 'Open report'}</span>
           </Link>
         )
       },
@@ -259,7 +259,7 @@ function createColumns(
               {(editable || canSubmitReport) && cancellable && <DropdownMenuSeparator />}
               {(r.tripReportId || r.tripReportDueAt) && (
                 <DropdownMenuItem asChild>
-                  <Link href={`/fleet/reports/${r.id}`}><FileText className="size-4" />{canSubmitReport ? 'Continue draft' : 'Open report'}</Link>
+                  <Link href={`/fleet/reports/${r.id}`}><FileText className="size-4" />{canSubmitReport ? r.tripReportSubmittedAt ? 'Edit report' : 'Continue draft' : 'Open report'}</Link>
                 </DropdownMenuItem>
               )}
               {editable && canSubmitReport && <DropdownMenuSeparator />}

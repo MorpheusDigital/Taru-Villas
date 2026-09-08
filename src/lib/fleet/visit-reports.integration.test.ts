@@ -74,13 +74,21 @@ describe.skipIf(process.env.RUN_VISIT_REPORT_DB_TESTS !== 'true')('visit report 
         expect(await tx.select({ id: taskAssignees.profileId }).from(taskAssignees).where(eq(taskAssignees.taskId, report.reportingTaskId!))).toEqual([{ id: owner.id }])
         const data = { summary: 'Checked equipment', details: { visitPurpose: 'Inspection', visitLocation: 'Site', visitDate: '2026-09-08', outcomes: 'Follow-up needed' },
           linkedTaskIds: [reason.id], attachmentUrls: [], newTasks: [{ title: 'Follow up', projectId: project.id, priority: 'high' as const, assigneeIds: [owner.id], dueDate: '2026-09-12' }] }
+        // Keep edit tests independent of the calendar date on which this suite runs.
+        await tx.update(fleetTripReports).set({ dueAt: new Date(Date.now() + 172800000) }).where(eq(fleetTripReports.id, report.id)).returning()
         await expect(submitVisitReportInTransaction(tx, request.id, booker.orgId, booker.id, data)).rejects.toThrow('Only the report owner')
         await expect(submitVisitReportInTransaction(tx, request.id, crypto.randomUUID(), owner.id, data)).rejects.toThrow('Report not found')
         await expect(submitVisitReportInTransaction(tx, request.id, booker.orgId, owner.id, { ...data, linkedTaskIds: [crypto.randomUUID()] })).rejects.toThrow('linked task')
         await expect(submitVisitReportInTransaction(tx, request.id, booker.orgId, owner.id, { ...data, newTasks: [{ ...data.newTasks[0], projectId: crypto.randomUUID() }] })).rejects.toThrow('active project')
         await expect(submitVisitReportInTransaction(tx, request.id, booker.orgId, owner.id, { ...data, newTasks: [{ ...data.newTasks[0], assigneeIds: [crypto.randomUUID()] }] })).rejects.toThrow('active assignees')
         await submitVisitReportInTransaction(tx, request.id, booker.orgId, owner.id, data)
-        await expect(saveVisitReportDraftInTransaction(tx, request.id, booker.orgId, owner.id, draft)).rejects.toThrow('Submitted')
+        const revision = { ...data, summary: 'Updated inspection notes', newTasks: [] }
+        await expect(saveVisitReportDraftInTransaction(tx, request.id, booker.orgId, booker.id, revision)).rejects.toThrow('report owner')
+        await expect(saveVisitReportDraftInTransaction(tx, request.id, booker.orgId, owner.id, data)).rejects.toThrow('Task Manager')
+        const edited = await saveVisitReportDraftInTransaction(tx, request.id, booker.orgId, owner.id, revision)
+        expect(edited.summary).toBe('Updated inspection notes')
+        expect(edited.submittedAt).not.toBeNull()
+        await saveVisitReportDraftInTransaction(tx, request.id, booker.orgId, owner.id, revision)
         await submitVisitReportInTransaction(tx, request.id, booker.orgId, owner.id, data)
         expect((await tx.select().from(tasks).where(eq(tasks.id, report.reportingTaskId!)))[0].status).toBe('done')
         expect((await tx.select().from(tasks).where(eq(tasks.id, reason.id)))[0].status).toBe('todo')
@@ -88,6 +96,11 @@ describe.skipIf(process.env.RUN_VISIT_REPORT_DB_TESTS !== 'true')('visit report 
         expect(follows).toHaveLength(1)
         expect(follows[0].status).toBe('todo')
         expect(await tx.select().from(fleetReportTaskLinks).where(eq(fleetReportTaskLinks.reportId, report.id))).toHaveLength(2)
+        await tx.update(fleetTripReports).set({ dueAt: new Date('2020-01-01T00:00:00Z') }).where(eq(fleetTripReports.id, report.id)).returning()
+        await expect(saveVisitReportDraftInTransaction(tx, request.id, booker.orgId, owner.id, revision)).rejects.toThrow('editing window')
+        await tx.update(fleetTripReports).set({ dueAt: new Date('2020-01-01T00:00:00Z') }).where(eq(fleetTripReports.id, unlinkedReport.id)).returning()
+        await expect(saveVisitReportDraftInTransaction(tx, unlinked.id, booker.orgId, booker.id, draft)).rejects.toThrow('editing window')
+        await expect(submitVisitReportInTransaction(tx, unlinked.id, booker.orgId, booker.id, revision)).rejects.toThrow('editing window')
         expect(await completeDispatchInTransaction(tx, ride.id, driver.id)).toBeUndefined()
         throw rollback
       })

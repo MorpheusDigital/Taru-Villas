@@ -97,6 +97,12 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
   const [pending, setPending] = useState(false)
   const [savingDraft, setSavingDraft] = useState(false)
   const [reload, setReload] = useState(0)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  const windowClosed = !!data?.report.dueAt && now >= new Date(data.report.dueAt).getTime()
 
   useEffect(() => {
     const controller = new AbortController()
@@ -113,7 +119,7 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
         setSummary(draft?.summary ?? result.report.summary ?? '')
         setDetails({ ...emptyDetails, visitPurpose: result.request.purpose ?? '', visitLocation: result.request.destinationText ?? '', ...savedDetails, visitDate: visitDateInput(savedDetails?.visitDate ?? result.request.endDate) })
         setUrls(savedUrls?.length ? savedUrls : [''])
-        setLinkedTaskIds(draft?.linkedTaskIds ?? result.linkedTasks.map((task) => task.id))
+        setLinkedTaskIds(result.report.submittedAt ? [] : draft?.linkedTaskIds ?? result.linkedTasks.map((task) => task.id))
         setNewTasks(draft?.newTasks.map((task) => ({ ...task, dueDate: task.dueDate ?? '' })) ?? [])
       })
       .catch((cause: unknown) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Unable to load visit report') })
@@ -125,7 +131,7 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
   }
 
   async function saveDraft() {
-    if (!data?.canEdit || data.report.submittedAt || pending) return
+    if (!data?.canEdit || data.report.submittedAt || pending || windowClosed) return
     const attachments = urls.map((url) => url.trim()).filter(Boolean)
     if (attachments.length > 20 || attachments.some((url) => !safeUrl(url))) { toast.error('Use up to 20 valid HTTP or HTTPS supporting URLs.'); return }
     setPending(true)
@@ -148,7 +154,7 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!data?.canSubmit || data.report.submittedAt || pending) return
+    if (!data?.canSubmit || pending || windowClosed) return
     const attachments = urls.map((url) => url.trim()).filter(Boolean)
     if (!summary.trim() || !details.visitPurpose.trim() || !details.visitLocation.trim() || !details.visitDate || !details.outcomes.trim()) {
       toast.error('Complete the required visit details, work done and outcomes.'); return
@@ -161,7 +167,7 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
     setPending(true)
     try {
       const res = await fetch(`/api/fleet/reports/${requestId}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: data.report.submittedAt ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ summary: summary.trim(), attachmentUrls: attachments,
           details,
           linkedTaskIds,
@@ -172,8 +178,7 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
         const body = await res.json().catch(() => null)
         throw new Error(typeof body?.error === 'string' ? body.error : 'Failed to submit visit report')
       }
-      toast.success('Visit report submitted')
-      setData({ ...data, canEdit: false, canSubmit: false, report: { ...data.report, submittedAt: new Date().toISOString(), summary, details, attachmentUrls: attachments } })
+      toast.success(data.report.submittedAt ? 'Visit report updated' : 'Visit report submitted')
       setReload((value) => value + 1)
       router.refresh()
     } catch (cause) {
@@ -185,7 +190,7 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
   if (!data) return <p role="status" className="text-muted-foreground">Loading visit report…</p>
   const submitted = !!data.report.submittedAt
   const cancelled = data.request.status === 'cancelled'
-  const readOnly = !data.canEdit || submitted || cancelled
+  const readOnly = !data.canEdit || windowClosed || cancelled
   const overdue = !submitted && !cancelled && !!data.report.dueAt && new Date(data.report.dueAt) < new Date()
 
   return (
@@ -195,8 +200,9 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
         <Badge variant={overdue ? 'destructive' : 'secondary'}>{cancelled ? 'Cancelled' : submitted ? 'Submitted' : overdue ? 'Overdue' : 'Draft'}</Badge>
         {!cancelled && <p className="text-sm text-muted-foreground">{data.report.dueAt ? `Due ${colomboTime(data.report.dueAt)} (Asia/Colombo)${data.report.reportingTaskId ? ' · 48 hours after trip completion' : ' · Original reporting deadline'}` : 'Deadline starts after trip completion — due within 48h'}</p>}
         {cancelled && <p className="text-sm text-muted-foreground">This trip was cancelled. The report is read-only.</p>}
-        {submitted && <p className="text-sm text-muted-foreground">Submitted {colomboTime(data.report.submittedAt!)} (Asia/Colombo). This report is final.</p>}
-        {!submitted && !cancelled && !data.canEdit && <p className="text-sm text-muted-foreground">Only the designated report owner can edit and submit this report.</p>}
+        {submitted && <p className="text-sm text-muted-foreground">Submitted {colomboTime(data.report.submittedAt!)} (Asia/Colombo). Changes are allowed until the editing deadline.</p>}
+        {windowClosed && !cancelled && <p className="text-sm text-muted-foreground">The 48-hour editing window has closed. This report is read-only.</p>}
+        {!windowClosed && !cancelled && !data.canEdit && <p className="text-sm text-muted-foreground">Only the designated report owner can edit and submit this report.</p>}
         {!submitted && !cancelled && data.canEdit && !data.canSubmit && <p className="text-sm text-muted-foreground">You can start drafting now. Submit the final report after the trip is completed.</p>}
       </div>
       <form onSubmit={submit} className="space-y-6">
@@ -226,13 +232,13 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
         <Card>
           <CardHeader><CardTitle>Linked tasks</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">Link tasks supported by this visit. Linking a task does not complete it. The original ride-related task stays linked.</p>
+            <p className="text-sm text-muted-foreground">Link tasks supported by this visit. Linking a task does not complete it. Existing submitted links are retained. After submission, create additional tasks in Task Manager and link them here.</p>
             {data.linkedTasks.map((task) => <Link key={task.id} href={`/tasks/${task.projectId}?task=${task.id}`} className="block text-sm underline">{task.title}</Link>)}
-            {!readOnly && <div className="max-h-64 space-y-3 overflow-y-auto rounded-md border p-3">{data.taskOptions.length ? data.taskOptions.map((task) => <label key={task.id} className="flex items-start gap-2 text-sm"><Checkbox checked={linkedTaskIds.includes(task.id)} disabled={pending || task.id === data.report.taskId || (!linkedTaskIds.includes(task.id) && linkedTaskIds.length >= 20)} onCheckedChange={(checked) => setLinkedTaskIds((current) => checked ? [...new Set([...current, task.id])] : current.filter((id) => id !== task.id))} /><span>{task.title}</span></label>) : <p className="text-sm text-muted-foreground">No additional tasks available.</p>}</div>}
+            {!readOnly && <div className="max-h-64 space-y-3 overflow-y-auto rounded-md border p-3">{data.taskOptions.length ? data.taskOptions.map((task) => <label key={task.id} className="flex items-start gap-2 text-sm"><Checkbox checked={linkedTaskIds.includes(task.id) || (submitted && data.linkedTasks.some((link) => link.id === task.id))} disabled={pending || task.id === data.report.taskId || (submitted && data.linkedTasks.some((link) => link.id === task.id)) || (!linkedTaskIds.includes(task.id) && linkedTaskIds.length >= 20)} onCheckedChange={(checked) => setLinkedTaskIds((current) => checked ? [...new Set([...current, task.id])] : current.filter((id) => id !== task.id))} /><span>{task.title}</span></label>) : <p className="text-sm text-muted-foreground">No additional tasks available.</p>}</div>}
             {readOnly && !data.linkedTasks.length && <p className="text-sm text-muted-foreground">No linked tasks.</p>}
           </CardContent>
         </Card>
-        {!readOnly && <Card>
+        {!readOnly && !submitted && <Card>
           <CardHeader><CardTitle>Create follow-up tasks</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">These tasks will be created when you submit the report. Add up to 10.</p>
@@ -247,7 +253,7 @@ export function VisitReportClient({ requestId }: { requestId: string }) {
             <Button type="button" variant="outline" disabled={pending || newTasks.length >= 10 || !data.projectOptions.length || !data.people.length} onClick={() => setNewTasks([...newTasks, { title: '', description: '', projectId: '', assigneeIds: [], priority: 'medium', dueDate: '' }])}><Plus className="size-4" />Add follow-up task</Button>
           </CardContent>
         </Card>}
-        {!readOnly && <div className="space-y-2"><p className="text-sm text-muted-foreground">Submission is final. Review the report and follow-up tasks before submitting.</p><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={pending} onClick={saveDraft}>{savingDraft ? 'Saving…' : 'Save draft'}</Button><Button type="submit" disabled={pending || !data.canSubmit}>{pending && !savingDraft ? 'Submitting…' : 'Submit visit report'}</Button></div></div>}
+        {!readOnly && <div className="space-y-2"><p className="text-sm text-muted-foreground">You can edit until 48 hours after trip completion, including after submission.</p><div className="flex flex-wrap gap-2">{!submitted && <Button type="button" variant="outline" disabled={pending} onClick={saveDraft}>{savingDraft ? 'Saving…' : 'Save draft'}</Button>}<Button type="submit" disabled={pending || !data.canSubmit}>{pending && !savingDraft ? 'Saving…' : submitted ? 'Save changes' : 'Submit visit report'}</Button></div></div>}
       </form>
     </div>
   )

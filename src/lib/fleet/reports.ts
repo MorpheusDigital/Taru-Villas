@@ -4,6 +4,10 @@ export function reportDeadline(completedAt: Date) {
   return new Date(completedAt.getTime() + 48 * 60 * 60 * 1000)
 }
 
+export function isReportEditingOpen(dueAt: Date | null, now = new Date()) {
+  return dueAt === null || now.getTime() < dueAt.getTime()
+}
+
 export const visitReportDetailsSchema = z.object({
   visitPurpose: z.string().trim().min(1).max(2000),
   visitLocation: z.string().trim().min(1).max(1000),

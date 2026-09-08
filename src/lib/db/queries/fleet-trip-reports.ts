@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, ne } from 'drizzle-orm'
 import { db } from '..'
 import { dispatches, dispatchStops, fleetRequests, fleetTripReports, fleetReportTaskLinks, profiles, projects, properties, taskAssignees, tasks } from '../schema'
-import { reportDeadline, visitReportSubmissionSchema, visitReportDraftSchema, type VisitReportSubmission, type VisitReportDraft } from '../../fleet/reports'
+import { reportDeadline, isReportEditingOpen, visitReportSubmissionSchema, visitReportDraftSchema, type VisitReportSubmission, type VisitReportDraft } from '../../fleet/reports'
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
 export class VisitReportError extends Error {}
@@ -79,7 +79,7 @@ export async function getVisitReportPage(requestId: string, orgId: string, userI
   const linkedTasks = [...links]
   const original = taskOptions.find(t => t.id === report.taskId)
   if (original && !linkedTasks.some(t => t.id === original.id)) linkedTasks.push(original)
-  const canEdit = report.submittedBy === userId && !report.submittedAt && request.status !== 'cancelled'
+  const canEdit = report.submittedBy === userId && isReportEditingOpen(report.dueAt) && request.status !== 'cancelled'
   return { report, request, linkedTasks, taskOptions, projectOptions, people, canEdit, canSubmit: canEdit && request.status === 'completed' }
 }
 
@@ -90,7 +90,24 @@ export async function saveVisitReportDraftInTransaction(tx: Transaction, request
   const [report] = await tx.select().from(fleetTripReports).where(and(eq(fleetTripReports.requestId, requestId), eq(fleetTripReports.orgId, orgId))).for('update')
   if (!report) throw new VisitReportError('Report not found')
   if (report.submittedBy !== ownerId) throw new VisitReportError('Only the report owner can save a draft')
-  if (report.submittedAt) throw new VisitReportError('Submitted reports cannot be edited')
+  if (!isReportEditingOpen(report.dueAt)) throw new VisitReportError('The 48-hour editing window has closed. This report is read-only.')
+  if (report.submittedAt) {
+    const parsed = visitReportSubmissionSchema.safeParse(input)
+    if (!parsed.success) throw new VisitReportError('Complete the required report fields before saving changes')
+    const data = parsed.data
+    // Revisions never repeat the submission's task-creation side effects.
+    if (data.newTasks.length) throw new VisitReportError('Create additional follow-up tasks in Task Manager, then link them here')
+    const linkedIds = [...new Set([...data.linkedTaskIds, ...(report.taskId ? [report.taskId] : [])])]
+    if (report.reportingTaskId && linkedIds.includes(report.reportingTaskId)) throw new VisitReportError('The reporting task cannot be a follow-up linked task')
+    const validLinks = linkedIds.length ? await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.orgId, orgId), inArray(tasks.id, linkedIds))).for('share') : []
+    if (validLinks.length !== linkedIds.length) throw new VisitReportError('Choose a linked task in your organization')
+    // Keep existing links (including generated follow-ups) as report history.
+    if (linkedIds.length) await tx.insert(fleetReportTaskLinks).values(linkedIds.map(taskId => ({ orgId, reportId: report.id, taskId })))
+      .onConflictDoNothing({ target: [fleetReportTaskLinks.reportId, fleetReportTaskLinks.taskId] }).returning()
+    const [saved] = await tx.update(fleetTripReports).set({ summary: data.summary, details: data.details, attachmentUrls: data.attachmentUrls, draft: null, updatedAt: new Date() })
+      .where(eq(fleetTripReports.id, report.id)).returning()
+    return saved
+  }
   const draft = visitReportDraftSchema.parse(input)
   const [saved] = await tx.update(fleetTripReports).set({ draft, updatedAt: new Date() }).where(eq(fleetTripReports.id, report.id)).returning()
   return saved
@@ -108,6 +125,7 @@ export async function submitVisitReportInTransaction(tx: Transaction, requestId:
   if (report.submittedBy !== ownerId) throw new VisitReportError('Only the report owner can submit this report')
   // Row lock serializes submissions and retries, including new task creation.
   if (report.submittedAt) return report
+  if (!isReportEditingOpen(report.dueAt)) throw new VisitReportError('The 48-hour editing window has closed. This report is read-only.')
   const data = visitReportSubmissionSchema.parse(input)
   if (request.status !== 'completed') throw new VisitReportError('The ride must be completed before reporting')
   const linkedIds = [...new Set([...data.linkedTaskIds, ...(report.taskId ? [report.taskId] : [])])]
