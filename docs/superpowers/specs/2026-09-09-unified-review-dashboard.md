@@ -1,0 +1,15 @@
+# Unified review dashboard
+
+User request: combine Internal, Guest and Google Reviews into one dashboard, label each entry by source, synthesize current Google text into category overviews and show historical scores. User selected equal weight per available source.
+
+The headline is a 0–10 normalized composite. Normalize each survey response using its scale bounds and category weight, then average within each submission. Average submissions within each source. Google stars normalize using (rating - 1) / 4 * 10, matching the existing survey scale-bound convention. Average available source means equally; missing sources are unavailable, not zero. Show original Google /5 rating alongside the normalized score and source contribution. Never add inferred category scores to the overall score (avoids double counting).
+
+Keep one portfolio view and one property view, with source filter, period filter, property cards, shared category overview, trend chart, and paginated feedback feed. Feed entries are submissions or Google reviews, not individual answers. Source badges and original dates remain visible. Preserve org/property access controls and existing utility rollup.
+
+Seven comparable hospitality categories: Cleanliness, Staff & service, Food & dining, Location, Value for money, Room comfort, Facilities. Existing survey categories map only when semantically equivalent; unmapped categories remain visible as survey-only categories. Explicit Google Rooms/Service/Location subratings take precedence for their categories. AI inference uses only a category's mentioned text, stores exact supporting excerpts and provenance, never fills missing categories with overall rating or zero. Distinguish direct vs AI-inferred evidence and show counts. Current snapshot synthesis is a one-time backfill; no automatic external AI service is configured.
+
+Historical overall points use real ratings, not AI-generated ratings. Monthly series includes only dates with month-or-better precision; year-only and edited Google dates are excluded from chronology, with counts disclosed. Empty months are gaps. Historical categories use the same precision rules. All-time view includes coarse-date reviews; filtered periods exclude chronology-ineligible Google records. Trend tooltips expose source mix/counts so changing source availability is visible.
+
+Persist review analysis independently, keyed by existing review id and rubric version, without altering raw reviews. Validate review identity, allowed categories/scores, verbatim evidence, exact input coverage and idempotency before import. Exclude manual demo reviews everywhere. Read-only synthesis files are not committed with reviewer personal data; importer reads local artifacts.
+
+UI follows existing portal typography/colors and responsive layout. One score summary with source contributions, two analytical sections, property grid (portfolio) and feedback list. Test scoring, no-data semantics, date uncertainty, category provenance, source isolation, pagination; run TypeScript, build, live read-only checks, and browser verification before authorized deployment.

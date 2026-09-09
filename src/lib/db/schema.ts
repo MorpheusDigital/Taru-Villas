@@ -2423,3 +2423,16 @@ export const otaReviewsRelations = relations(otaReviews, ({ one }) => ({
   property: one(properties, { fields: [otaReviews.propertyId], references: [properties.id] }),
   source: one(otaReviewSources, { fields: [otaReviews.sourceId], references: [otaReviewSources.id] }),
 }))
+
+export const otaReviewAnalyses = pgTable('ota_review_analyses', {
+  reviewId: uuid('review_id').primaryKey().references(() => otaReviews.id, { onDelete: 'cascade' }),
+  rubricVersion: text('rubric_version').notNull(),
+  model: text('model').notNull(),
+  inputHash: text('input_hash').notNull(),
+  aspects: jsonb('aspects').$type<Array<{ key: string; score: number; evidence: string; confidence: string }>>().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+export const otaReviewAnalysesRelations = relations(otaReviewAnalyses, ({ one }) => ({
+  review: one(otaReviews, { fields: [otaReviewAnalyses.reviewId], references: [otaReviews.id] }),
+}))
