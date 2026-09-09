@@ -268,6 +268,7 @@ export function DashboardOverview({
               <TabsTrigger value="guest" className="flex-1 sm:flex-none">
                 Guest
               </TabsTrigger>
+            <TabsTrigger value="google">Google Reviews</TabsTrigger>
             </TabsList>
           </Tabs>
           <DateFilter onChange={handleDateChange} />

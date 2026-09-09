@@ -1,8 +1,9 @@
 export const dynamic = 'force-dynamic'
 
 import { notFound, redirect } from 'next/navigation'
+import { GoogleReviewsDashboard } from '@/components/dashboard/google-reviews-dashboard'
 import { requireAuth } from '@/lib/auth/guards'
-import { getPropertyById } from '@/lib/db/queries/properties'
+import { getPropertyByIdForOrganization } from '@/lib/db/queries/properties'
 import {
   getPropertyScores,
   getCategoryBreakdown,
@@ -27,19 +28,19 @@ export default async function PropertyDashboardPage({
   searchParams,
 }: {
   params: Promise<{ propertyId: string }>
-  searchParams: Promise<{ surveyType?: string }>
+  searchParams: Promise<{ surveyType?: string; reviewPage?: string }>
 }) {
   const { propertyId } = await params
   const sp = await searchParams
-  const surveyType = (sp.surveyType as 'internal' | 'guest') || undefined
+  const surveyType = sp.surveyType === 'guest' ? 'guest' : 'internal'
   const profile = await requireAuth()
 
-  if (!profile) {
+  if (!profile || !profile.isActive) {
     return null
   }
 
   // Fetch property details
-  const property = await getPropertyById(propertyId)
+  const property = await getPropertyByIdForOrganization(propertyId, profile.orgId)
   if (!property) {
     notFound()
   }
@@ -53,6 +54,8 @@ export default async function PropertyDashboardPage({
   if (!isAdmin && !isPM && !isAssigned) {
     redirect('/tasks')
   }
+
+  if (sp.surveyType === 'google') return <GoogleReviewsDashboard orgId={profile.orgId} property={property} page={sp.reviewPage} showPortfolioLink={isAdmin} />
 
   // Fetch all dashboard data in parallel — only submitted surveys
   const [scores, categories, subcategories, trends, notes] = await Promise.all([

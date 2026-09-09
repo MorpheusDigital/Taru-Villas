@@ -317,6 +317,7 @@ export function PropertyDashboard({
             <TabsList>
               <TabsTrigger value="internal">Internal</TabsTrigger>
               <TabsTrigger value="guest">Guest</TabsTrigger>
+            <TabsTrigger value="google">Google Reviews</TabsTrigger>
             </TabsList>
           </Tabs>
           <DateFilter onChange={handleDateChange} />

@@ -15,6 +15,7 @@ import {
   type PropertyOverview,
   type OverviewStats,
 } from '@/components/dashboard/dashboard-overview'
+import { GoogleReviewsDashboard } from '@/components/dashboard/google-reviews-dashboard'
 import { UtilityKpiRollup } from '@/components/dashboard/utility-kpi-rollup'
 
 // ---------------------------------------------------------------------------
@@ -39,14 +40,15 @@ const CHART_COLORS = [
 // ---------------------------------------------------------------------------
 
 interface DashboardPageProps {
-  searchParams: Promise<{ surveyType?: string }>
+  searchParams: Promise<{ surveyType?: string; reviewPage?: string }>
 }
 
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const profile = await requireRole(['admin'])
 
   const params = await searchParams
-  const surveyType = (params.surveyType as 'internal' | 'guest') || undefined
+  if (params.surveyType === 'google') return <GoogleReviewsDashboard orgId={profile.orgId} />
+  const surveyType = params.surveyType === 'guest' ? 'guest' : 'internal'
 
   const orgId = profile.orgId
 
