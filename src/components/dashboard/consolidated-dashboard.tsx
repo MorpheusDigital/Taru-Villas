@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { buttonVariants } from '@/components/ui/button'
 import { getConsolidatedFeedback } from '@/lib/db/queries/consolidated-reviews'
 import { getProperties } from '@/lib/db/queries/properties'
-import { consolidateFeedback, filterFeedback, SOURCE_LABELS, SOURCES, type FeedbackSource, type ReviewPeriod } from '@/lib/reviews/consolidated'
+import { categoryScoreColors, consolidateFeedback, filterFeedback, SOURCE_LABELS, SOURCES, type FeedbackSource, type ReviewPeriod } from '@/lib/reviews/consolidated'
 import { REVIEW_PAGE_SIZE, reviewPagination } from '@/lib/reviews/display'
 import { ConsolidatedTrendChart } from './consolidated-trend-chart'
 
@@ -14,7 +14,7 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
   orgId:string;property?:{id:string;name:string};filters:DashboardFilters;showPortfolioLink?:boolean
 }) {
   const [all,allProperties]=await Promise.all([getConsolidatedFeedback(orgId,property?.id),property?Promise.resolve([]):getProperties(orgId)])
-  const source:FeedbackSource|'all'=SOURCES.includes(filters.source as FeedbackSource)?filters.source as FeedbackSource:'all'
+  const source:FeedbackSource|'all'=SOURCES.some(item=>item===filters.source)?filters.source as FeedbackSource:'all'
   const period:ReviewPeriod=['3m','6m','12m'].includes(filters.period??'')?filters.period as ReviewPeriod:'all'
   const entries=filterFeedback(all,source,period)
   const summary=consolidateFeedback(entries)
@@ -32,7 +32,7 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
       <div className="space-y-1">
         {property&&showPortfolioLink&&<Link href={`/dashboard?${query}`} className="text-sm text-muted-foreground hover:underline">All properties</Link>}
         <h1 className="text-2xl font-bold tracking-tight">{property?.name??'Quality overview'}</h1>
-        <p className="text-sm text-muted-foreground">Internal checks and guest feedback, together.</p>
+        <p className="text-sm text-muted-foreground">Guest feedback across surveys and Google reviews.</p>
       </div>
       <form action={base} className="flex flex-wrap items-end gap-2">
         <label className="space-y-1 text-xs text-muted-foreground"><span className="block">Source</span><select name="source" defaultValue={source} className="h-9 rounded-md border bg-background px-2 text-sm text-foreground">
@@ -54,7 +54,7 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
           <p className="mt-2 max-w-prose leading-relaxed">Each available source has equal weight. Survey responses use their configured scales and category weights, then each submission counts once. Google stars are normalized from 1–5 to 0–10, so 1 star = 0 and 5 stars = 10. Missing sources have no weight. AI category estimates do not change this score.</p>
         </details>
       </div>
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         {summary.sources.map(item=><div key={item.source} className="border-l-2 pl-4">
           <span className={`inline-flex rounded-md px-2 py-1 text-xs font-medium ${badgeColors[item.source]}`}>{SOURCE_LABELS[item.source]}</span>
           <p className="mt-3 text-2xl font-semibold tabular-nums">{formattedScore(item.score)}<span className="ml-1 text-xs font-normal text-muted-foreground">/ 10</span></p>
@@ -81,11 +81,12 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
 
     <Card><CardHeader><CardTitle className="text-base">Category overview</CardTitle>
       <p className="text-xs leading-relaxed text-muted-foreground">Direct survey scores and Google subratings are combined with AI-inferred sentiment from written reviews. Only mentioned categories contribute; available sources have equal weight within each category.</p>
+      <p className="text-xs text-muted-foreground"><span className="text-emerald-700 dark:text-emerald-400">Green: above 8</span> · <span className="text-yellow-700 dark:text-yellow-400">Yellow: 5–8</span> · <span className="text-red-700 dark:text-red-400">Red: below 5</span></p>
     </CardHeader><CardContent>
       {summary.categories.length?<div className="grid gap-x-8 gap-y-6 sm:grid-cols-2 xl:grid-cols-3">
         {summary.categories.map(item=><div key={item.key}>
-          <div className="flex items-center justify-between gap-2 text-sm"><h3 className="font-medium">{item.label}</h3><span className="font-semibold tabular-nums">{formattedScore(item.score)} / 10</span></div>
-          <div className="mt-2 h-1.5 rounded-full bg-muted" aria-hidden="true"><div className="h-full rounded-full bg-primary" style={{width:`${(item.score??0)*10}%`}} /></div>
+          <div className="flex items-center justify-between gap-2 text-sm"><h3 className="font-medium">{item.label}</h3><span className={`font-semibold tabular-nums ${categoryScoreColors(item.score).text}`}>{formattedScore(item.score)} / 10</span></div>
+          <div className="mt-2 h-1.5 rounded-full bg-muted" aria-hidden="true"><div className={`h-full rounded-full ${categoryScoreColors(item.score).bar}`} style={{width:`${(item.score??0)*10}%`}} /></div>
           <p className="mt-2 text-xs text-muted-foreground">{item.count} assessments{item.inferredCount?`, ${item.inferredCount} AI-inferred`:''}</p>
           <p className="mt-1 text-xs text-muted-foreground">{item.sources.filter(s=>s.count>0).map(s=>`${SOURCE_LABELS[s.source]} ${formattedScore(s.score)} (${s.count})`).join(' · ')}</p>
         </div>)}
@@ -107,7 +108,7 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
         </div>
         {entry.text?<p className="max-w-prose whitespace-pre-wrap break-words text-sm leading-relaxed">{entry.text}</p>:<p className="text-sm italic text-muted-foreground">Scored feedback without written comments.</p>}
         {entry.aspects.length>0&&<details className="text-xs"><summary className="cursor-pointer text-muted-foreground hover:text-foreground">Category evidence ({entry.aspects.length})</summary><ul className="mt-3 space-y-3">
-          {entry.aspects.map(aspect=><li key={aspect.key}><p className="font-medium">{aspect.label}: {aspect.score.toFixed(1)} / 10 <span className="font-normal text-muted-foreground">({aspect.kind==='inferred'?'AI-inferred':'Direct score'})</span></p>{aspect.evidence&&<blockquote className="mt-1 max-w-prose border-l-2 pl-3 text-muted-foreground">{aspect.evidence}</blockquote>}</li>)}
+          {entry.aspects.map(aspect=><li key={aspect.key}><p className="font-medium">{aspect.label}: <span className={categoryScoreColors(aspect.score).text}>{aspect.score.toFixed(1)} / 10</span> <span className="font-normal text-muted-foreground">({aspect.kind==='inferred'?'AI-inferred':'Direct score'})</span></p>{aspect.evidence&&<blockquote className="mt-1 max-w-prose border-l-2 pl-3 text-muted-foreground">{aspect.evidence}</blockquote>}</li>)}
         </ul></details>}
         {entry.sourceUrl&&<a href={entry.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:underline">View property on Google Maps<ArrowUpRight className="size-3" /></a>}
       </CardContent></Card>)}

@@ -1,5 +1,6 @@
-export const SOURCES = ['internal', 'guest', 'google'] as const
-export type FeedbackSource = typeof SOURCES[number]
+// Internal submissions are test data and are excluded from the live dashboard.
+export const SOURCES = ['guest', 'google'] as const
+export type FeedbackSource = 'internal' | typeof SOURCES[number]
 export const SOURCE_LABELS = { internal: 'Internal', guest: 'Guest', google: 'Google' }
 export const CATEGORY_LABELS: Record<string, string> = {
   cleanliness: 'Cleanliness', staff: 'Staff & service', food: 'Food & dining',
@@ -65,7 +66,7 @@ export function filterFeedback(entries: FeedbackEntry[], source: FeedbackSource 
   if (period !== 'all') cutoff.setUTCMonth(cutoff.getUTCMonth() - Number(period.slice(0,-1)) + 1)
   const cutoffDate = cutoff.toISOString().slice(0,10)
   const today = now.toISOString().slice(0,10)
-  return entries.filter(entry => (source === 'all' || source === entry.source) &&
+  return entries.filter(entry => entry.source !== 'internal' && (source === 'all' || source === entry.source) &&
     (period === 'all' || (entry.chronologyEligible && entry.date >= cutoffDate && entry.date <= today)))
 }
 
@@ -77,7 +78,8 @@ function sourceSummary(entries: FeedbackEntry[], category?: string) {
     return {source, score:mean(values), count:values.length}
   })
 }
-export function consolidateFeedback(entries: FeedbackEntry[]) {
+export function consolidateFeedback(input: FeedbackEntry[]) {
+  const entries = input.filter(entry => entry.source !== 'internal')
   const sourceScores = sourceSummary(entries)
   const active = sourceScores.filter(source => source.score !== null)
   const score = mean(active.map(source => source.score!))
@@ -113,4 +115,11 @@ export function consolidateFeedback(entries: FeedbackEntry[]) {
     categories, trends, excludedFromTrends:entries.length - eligible.length,
     inferredReviews:entries.filter(entry => entry.aspects.some(a => a.kind === 'inferred')).length,
   }
+}
+
+export function categoryScoreColors(score: number | null) {
+  if (score === null) return {text:'text-muted-foreground',bar:'bg-muted-foreground'}
+  if (score > 8) return {text:'text-emerald-700 dark:text-emerald-400',bar:'bg-emerald-500'}
+  if (score >= 5) return {text:'text-yellow-700 dark:text-yellow-400',bar:'bg-yellow-400'}
+  return {text:'text-red-700 dark:text-red-400',bar:'bg-red-500'}
 }

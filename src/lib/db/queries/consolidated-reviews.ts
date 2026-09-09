@@ -30,7 +30,7 @@ export async function getConsolidatedFeedback(orgId: string, propertyId?: string
       .leftJoin(surveyQuestions,eq(surveyQuestions.id,surveyResponses.questionId))
       .leftJoin(surveySubcategories,eq(surveySubcategories.id,surveyQuestions.subcategoryId))
       .leftJoin(surveyCategories,and(eq(surveyCategories.id,surveySubcategories.categoryId),eq(surveyCategories.templateId,surveySubmissions.templateId)))
-      .where(and(scope,eq(surveySubmissions.status,'submitted'))),
+      .where(and(scope,eq(surveySubmissions.status,'submitted'),eq(surveyTemplates.surveyType,'guest'))),
   ])
   const entries: FeedbackEntry[] = google.map(row => ({
     id:row.id,propertyId:row.propertyId,propertyName:row.propertyName,source:'google',author:row.author || 'Google reviewer',

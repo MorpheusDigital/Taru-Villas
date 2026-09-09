@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { consolidateFeedback, normalizeRating, googleAspects, googleChronologyEligible, mapSurveyCategory, filterFeedback } from './consolidated'
+import { categoryScoreColors, consolidateFeedback, normalizeRating, googleAspects, googleChronologyEligible, mapSurveyCategory, filterFeedback } from './consolidated'
 import type { FeedbackEntry } from './consolidated'
 const entry = (id: string, source: FeedbackEntry['source'], score: number, extra: Partial<FeedbackEntry> = {}): FeedbackEntry => ({
   id, source, score, propertyId: 'p', propertyName: 'Villa', author: 'Reviewer', text: '', date: '2026-08-01', dateLabel: '1 Aug 2026', chronologyEligible: true, aspects: [], ...extra,
 })
 describe('consolidated review scores', () => {
   it('gives each available source equal weight regardless of review volume', () => {
-    const data = consolidateFeedback([entry('i','internal',2), ...Array.from({length:100}, (_, i) => entry(`g${i}`,'google',10))])
+    const data = consolidateFeedback([entry('i','guest',2), ...Array.from({length:100}, (_, i) => entry(`g${i}`,'google',10))])
     expect(data.score).toBe(6)
-    expect(data.sources.find(s => s.source === 'internal')?.weight).toBe(.5)
-    expect(data.sources.find(s => s.source === 'guest')?.weight).toBe(0)
+    expect(data.sources.find(s => s.source === 'guest')?.weight).toBe(.5)
+    expect(data.sources).toHaveLength(2)
   })
   it('distinguishes a real zero from unavailable data', () => {
     expect(consolidateFeedback([]).score).toBeNull()
@@ -42,7 +42,7 @@ describe('consolidated review scores', () => {
   })
   it('balances category sources and does not double count inferred categories in overall score', () => {
     const data = consolidateFeedback([
-      entry('i','internal',4,{aspects:[{key:'staff',label:'Staff & service',score:2,kind:'rated'}]}),
+      entry('i','guest',4,{aspects:[{key:'staff',label:'Staff & service',score:2,kind:'rated'}]}),
       entry('g','google',8,{aspects:[{key:'staff',label:'Staff & service',score:10,kind:'inferred',evidence:'Excellent service'}]}),
       entry('g2','google',8,{aspects:[{key:'staff',label:'Staff & service',score:10,kind:'inferred',evidence:'Excellent service'}]}),
     ])
@@ -51,5 +51,24 @@ describe('consolidated review scores', () => {
     expect(data.categories[0].count).toBe(3)
     expect(data.categories[0].inferredCount).toBe(2)
     expect(data.trends[0].score).toBe(6)
+  })
+})
+
+describe('dummy internal feedback exclusion', () => {
+  it('excludes internal entries from counts, scores, categories and history', () => {
+    const entries = [entry('dummy','internal',2,{aspects:[{key:'survey:test',label:'Test',score:2,kind:'rated'}]}),entry('g','google',10)]
+    expect(filterFeedback(entries,'all','all')).toHaveLength(1)
+    const summary = consolidateFeedback(entries)
+    expect(summary.count).toBe(1)
+    expect(summary.score).toBe(10)
+    expect(summary.categories).toEqual([])
+    expect(summary.sources.map(source=>source.source)).not.toContain('internal')
+  })
+})
+
+describe('category score colors', () => {
+  it.each([[0,'red'],[4.99,'red'],[5,'yellow'],[8,'yellow'],[8.01,'emerald'],[10,'emerald']] as const)('colors %s as %s', (score,color) => {
+    expect(categoryScoreColors(score).text).toContain(color)
+    expect(categoryScoreColors(score).bar).toContain(color)
   })
 })
