@@ -32,7 +32,13 @@ try {
       where s.source='tripadvisor' and r.property_id in ${tx(files.map(({file})=>file.propertyId))}`
     for(const review of existingReviews) if(!files.some(({file,rows})=>file.propertyId===review.property_id && rows.some(row=>row.id===review.external_review_id))) throw Error('Input snapshot would omit an existing Tripadvisor review')
     if(apply) {
-      await tx.unsafe(await fs.readFile(new URL('../drizzle/0033_tripadvisor_review_source.sql',import.meta.url),'utf8'))
+      // Avoid an ACCESS EXCLUSIVE migration lock on repeat imports once the exact constraint is installed.
+      const [constraint]=await tx`select pg_get_constraintdef(oid) definition,convalidated from pg_constraint
+        where conrelid='ota_review_sources'::regclass and conname='ota_review_sources_source_check'`
+      const expectedConstraint="CHECK ((source = ANY (ARRAY['google'::text, 'tripadvisor'::text])))"
+      if(!constraint?.convalidated || constraint.definition.replace(/\s+/g,' ').trim()!==expectedConstraint) {
+        await tx.unsafe(await fs.readFile(new URL('../drizzle/0033_tripadvisor_review_source.sql',import.meta.url),'utf8'))
+      }
       for(const {file,rows} of files) {
         await tx`insert into ota_review_sources (property_id,source,external_id,is_active,last_fetched_at)
           values (${file.propertyId},'tripadvisor',${file.locationId},false,${file.collectedAt})
@@ -40,17 +46,26 @@ try {
           where ota_review_sources.last_fetched_at is distinct from excluded.last_fetched_at or ota_review_sources.last_fetch_error is not null returning id`
         const [source]=await tx`select id from ota_review_sources where property_id=${file.propertyId} and source='tripadvisor' and external_id=${file.locationId}`
         if(!source) throw Error('Source verification failed')
-        for(const row of rows) {
-          const [review]=await tx`insert into ota_reviews (source_id,property_id,external_review_id,author_name,rating,text,reviewed_at,fetched_at,raw_payload)
-            values (${source.id},${file.propertyId},${row.id},${row.author},${row.rating},${row.text},${row.reviewedAt},${file.collectedAt},${tx.json(row.raw)})
+        if(rows.length) {
+          // One round trip per property, with native JSONB parameters for every raw payload.
+          const reviewRecords=rows.map(row=>({source_id:source.id,property_id:file.propertyId,external_review_id:row.id,
+            author_name:row.author,rating:row.rating,text:row.text,reviewed_at:row.reviewedAt,fetched_at:file.collectedAt,raw_payload:tx.json(row.raw)}))
+          const reviews=await tx`insert into ota_reviews ${tx(reviewRecords,
+            'source_id','property_id','external_review_id','author_name','rating','text','reviewed_at','fetched_at','raw_payload')}
             on conflict (source_id,external_review_id) do update set property_id=excluded.property_id,author_name=excluded.author_name,
               rating=excluded.rating,text=excluded.text,reviewed_at=excluded.reviewed_at,fetched_at=excluded.fetched_at,raw_payload=excluded.raw_payload
-            returning id,text`
-          // Validate provenance against the actual persisted text, not only the input envelope.
-          if(review.text!==row.text || row.aspects.some(aspect=>!review.text.includes(aspect.evidence))) throw Error('Persisted evidence mismatch')
-          const hash=createHash('sha256').update(review.text).digest('hex')
-          await tx`insert into ota_review_analyses (review_id,rubric_version,model,input_hash,aspects)
-            values (${review.id},'hospitality-v1','gpt-6; offline review analysis',${hash},${tx.json(row.aspects)})
+            returning id,external_review_id,text`
+          // RETURNING order is not guaranteed; match each persisted row by its source review ID.
+          const byExternalId=new Map(reviews.map(review=>[review.external_review_id,review]))
+          if(reviews.length!==rows.length || byExternalId.size!==rows.length) throw Error('Persisted review coverage mismatch')
+          const analyses=rows.map(row=>{
+            const review=byExternalId.get(row.id)
+            // Validate provenance against the actual persisted text, not only the input envelope.
+            if(!review || review.text!==row.text || row.aspects.some(aspect=>!review.text.includes(aspect.evidence))) throw Error('Persisted evidence mismatch')
+            return {review_id:review.id,rubric_version:'hospitality-v1',model:'gpt-6; offline review analysis',
+              input_hash:createHash('sha256').update(review.text).digest('hex'),aspects:tx.json(row.aspects)}
+          })
+          await tx`insert into ota_review_analyses ${tx(analyses,'review_id','rubric_version','model','input_hash','aspects')}
             on conflict (review_id) do update set rubric_version=excluded.rubric_version,model=excluded.model,input_hash=excluded.input_hash,aspects=excluded.aspects,updated_at=now()
             where ota_review_analyses.input_hash is distinct from excluded.input_hash or ota_review_analyses.rubric_version is distinct from excluded.rubric_version
               or ota_review_analyses.aspects is distinct from excluded.aspects returning review_id`
