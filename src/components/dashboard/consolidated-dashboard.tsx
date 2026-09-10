@@ -46,7 +46,7 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
     <Card><CardContent className="grid gap-6 pt-6 lg:grid-cols-[minmax(0,1fr)_2fr]">
       <div>
         <p className="text-sm font-medium">Consolidated score</p>
-        <p className="mt-2 text-4xl font-semibold tracking-tight tabular-nums">{formattedScore(summary.score)}<span className="ml-2 text-base font-normal text-muted-foreground">/ 10</span></p>
+        <p className={`mt-2 text-4xl font-semibold tracking-tight tabular-nums ${categoryScoreColors(summary.score).text}`}>{formattedScore(summary.score)}<span className="ml-2 text-base font-normal text-muted-foreground">/ 10</span></p>
         <p className="mt-2 text-sm text-muted-foreground">{summary.count.toLocaleString()} reviews and surveys</p>
         <details className="mt-3 text-xs text-muted-foreground"><summary className="cursor-pointer hover:text-foreground">How the score is calculated</summary>
           <p className="mt-2 max-w-prose leading-relaxed">Guest, Internal and Reviews each have equal weight when available. Within Reviews, Google and Tripadvisor have equal weight. Survey responses use their configured scales and category weights, then each submission counts once. Google and Tripadvisor stars are normalized from 1–5 to 0–10, so 1 star = 0 and 5 stars = 10. Missing sources have no weight. AI category estimates do not change this score.</p>
@@ -55,7 +55,7 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
       <div className="grid gap-4 sm:grid-cols-3">
         {summary.sources.map(item=><div key={item.source} className="border-l-2 pl-4">
           <span className={`inline-flex rounded-md px-2 py-1 text-xs font-medium ${badgeColors[item.source]}`}>{SOURCE_LABELS[item.source]}</span>
-          <p className="mt-3 text-2xl font-semibold tabular-nums">{formattedScore(item.score)}<span className="ml-1 text-xs font-normal text-muted-foreground">/ 10</span></p>
+          <p className={`mt-3 text-2xl font-semibold tabular-nums ${categoryScoreColors(item.score).text}`}>{formattedScore(item.score)}<span className="ml-1 text-xs font-normal text-muted-foreground">/ 10</span></p>
           <p className="mt-1 text-xs text-muted-foreground">{item.count} scored entries · {Math.round(item.weight*100)}% weight</p>
           {item.source==='reviews'&&<p className="mt-1 text-xs text-muted-foreground">Google + Tripadvisor</p>}
           {item.score===null&&<p className="mt-1 text-xs text-muted-foreground">No scored feedback in this view</p>}
@@ -68,7 +68,7 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
         const data=consolidateFeedback(entries.filter(entry=>entry.propertyId===item.id))
         return <Link key={item.id} href={`/dashboard/${item.id}?${query}`} className="rounded-lg border bg-card p-4 transition-colors hover:border-primary/40 focus-visible:outline-2 focus-visible:outline-ring">
           <div className="flex items-center justify-between gap-2"><h2 className="font-medium">{item.name}</h2><ArrowUpRight className="size-4 text-muted-foreground" /></div>
-          <div className="mt-3 flex items-baseline justify-between gap-2"><span className="text-2xl font-semibold tabular-nums">{formattedScore(data.score)}<span className="ml-1 text-xs font-normal text-muted-foreground">/ 10</span></span><span className="text-xs text-muted-foreground">{data.count} entries</span></div>
+          <div className="mt-3 flex items-baseline justify-between gap-2"><span className={`text-2xl font-semibold tabular-nums ${categoryScoreColors(data.score).text}`}>{formattedScore(data.score)}<span className="ml-1 text-xs font-normal text-muted-foreground">/ 10</span></span><span className="text-xs text-muted-foreground">{data.count} entries</span></div>
           <p className="mt-2 text-xs text-muted-foreground">{data.sources.filter(s=>s.count>0).map(s=>`${SOURCE_LABELS[s.source]} ${s.count}`).join(' · ')||'No feedback yet'}</p>
         </Link>
       })}
@@ -79,7 +79,7 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
 
     <Card><CardHeader><CardTitle className="text-base">Category overview</CardTitle>
       <p className="text-xs leading-relaxed text-muted-foreground">Survey scores and direct subratings from Google and Tripadvisor are combined with AI-inferred sentiment from written reviews. Only mentioned categories contribute; available sources have equal weight within each category.</p>
-      <p className="text-xs text-muted-foreground"><span className="text-emerald-700 dark:text-emerald-400">Green: above 8</span> · <span className="text-yellow-700 dark:text-yellow-400">Yellow: 5–8</span> · <span className="text-red-700 dark:text-red-400">Red: below 5</span></p>
+      <p className="text-xs text-muted-foreground"><span className="text-green-900 dark:text-green-400">Dark green: above 9.5</span> · <span className="text-green-600 dark:text-green-300">Light green: 9–9.5</span> · <span className="text-yellow-700 dark:text-yellow-400">Yellow: above 8, below 9</span> · <span className="text-red-700 dark:text-red-400">Red: 8 and below</span></p>
     </CardHeader><CardContent>
       {summary.categories.length?<div className="grid gap-x-8 gap-y-6 sm:grid-cols-2 xl:grid-cols-3">
         {summary.categories.map(item=><div key={item.key}>

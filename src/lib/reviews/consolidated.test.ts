@@ -67,9 +67,9 @@ describe('dummy internal feedback exclusion', () => {
 })
 
 describe('category score colors', () => {
-  it.each([[0,'red'],[4.99,'red'],[5,'yellow'],[8,'yellow'],[8.01,'emerald'],[10,'emerald']] as const)('colors %s as %s', (score,color) => {
+  it.each([[0,'red'],[8,'red'],[8.01,'yellow'],[8.99,'yellow'],[9,'green-600'],[9.5,'green-600'],[9.504,'green-600'],[9.51,'green-900'],[10,'green-900']] as const)('colors %s as %s', (score,color) => {
     expect(categoryScoreColors(score).text).toContain(color)
-    expect(categoryScoreColors(score).bar).toContain(color)
+    expect(categoryScoreColors(score).bar).toContain(color==='green-600'?'green-500':color)
   })
 })
 

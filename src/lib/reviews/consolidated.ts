@@ -149,7 +149,9 @@ export function consolidateFeedback(input: FeedbackEntry[]) {
 
 export function categoryScoreColors(score: number | null) {
   if (score === null) return {text:'text-muted-foreground',bar:'bg-muted-foreground'}
-  if (score > 8) return {text:'text-emerald-700 dark:text-emerald-400',bar:'bg-emerald-500'}
-  if (score >= 5) return {text:'text-yellow-700 dark:text-yellow-400',bar:'bg-yellow-400'}
+  const displayed = Number(score.toFixed(2))
+  if (displayed > 9.5) return {text:'text-green-900 dark:text-green-400',bar:'bg-green-900 dark:bg-green-400'}
+  if (displayed >= 9) return {text:'text-green-600 dark:text-green-300',bar:'bg-green-500 dark:bg-green-300'}
+  if (displayed > 8) return {text:'text-yellow-700 dark:text-yellow-400',bar:'bg-yellow-400'}
   return {text:'text-red-700 dark:text-red-400',bar:'bg-red-500'}
 }
