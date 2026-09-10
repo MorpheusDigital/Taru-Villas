@@ -1,8 +1,8 @@
-import { and, eq, inArray, notLike } from 'drizzle-orm'
+import { and, eq, inArray, notInArray, notLike } from 'drizzle-orm'
 import { db } from '../index'
 import { otaReviews, otaReviewSources, otaReviewAnalyses, properties, surveySubmissions,
   surveyResponses, surveyTemplates, surveyQuestions, surveySubcategories, surveyCategories } from '../schema'
-import { type FeedbackEntry, type FeedbackAspect, googleAspects, tripadvisorAspects, googleChronologyEligible, mapSurveyCategory, normalizeRating } from '../../reviews/consolidated'
+import { INTERNAL_TEST_IDS, type FeedbackEntry, type FeedbackAspect, googleAspects, tripadvisorAspects, googleChronologyEligible, mapSurveyCategory, normalizeRating } from '../../reviews/consolidated'
 import { reviewDateLabel, reviewListingUrl } from '../../reviews/display'
 
 export async function getConsolidatedFeedback(orgId: string, propertyId?: string): Promise<FeedbackEntry[]> {
@@ -30,7 +30,7 @@ export async function getConsolidatedFeedback(orgId: string, propertyId?: string
       .leftJoin(surveyQuestions,eq(surveyQuestions.id,surveyResponses.questionId))
       .leftJoin(surveySubcategories,eq(surveySubcategories.id,surveyQuestions.subcategoryId))
       .leftJoin(surveyCategories,and(eq(surveyCategories.id,surveySubcategories.categoryId),eq(surveyCategories.templateId,surveySubmissions.templateId)))
-      .where(and(scope,eq(surveySubmissions.status,'submitted'),eq(surveyTemplates.surveyType,'guest'))),
+      .where(and(scope,eq(surveySubmissions.status,'submitted'),inArray(surveyTemplates.surveyType,['guest','internal']),notInArray(surveySubmissions.id,INTERNAL_TEST_IDS))),
   ])
   const entries: FeedbackEntry[] = online.map(row => ({
     id:row.id,propertyId:row.propertyId,propertyName:row.propertyName,source:row.source as 'google' | 'tripadvisor',author:row.author || `${row.source === 'tripadvisor' ? 'Tripadvisor' : 'Google'} reviewer`,

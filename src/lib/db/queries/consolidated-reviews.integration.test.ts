@@ -20,9 +20,11 @@ describe.skipIf(process.env.RUN_GOOGLE_REVIEW_DB_TESTS!=='true')('unified dashbo
     expect(await getConsolidatedFeedback('00000000-0000-0000-0000-000000000000',maia.id)).toEqual([])
     expect((await getConsolidatedFeedback(maia.orgId,maia.id)).every(entry=>entry.propertyId===maia.id)).toBe(true)
     const summary=consolidateFeedback(all)
-    const google=summary.sources.find(s=>s.source==='google')!
+    const reviews=summary.sources.find(s=>s.source==='reviews')!
+    expect(reviews.count).toBe(1663)
+    expect(summary.sources.map(source=>source.source)).toEqual(['guest','internal','reviews'])
     const available=summary.sources.filter(source=>source.score!==null)
-    expect(google.weight).toBe(1/available.length)
+    expect(reviews.weight).toBe(1/available.length)
     expect(summary.score).toBeCloseTo(available.reduce((sum,source)=>sum+source.score!,0)/available.length)
     expect(summary.categories.filter(c=>c.inferredCount>0)).toHaveLength(7)
     expect(summary.trends.length).toBeGreaterThan(0)

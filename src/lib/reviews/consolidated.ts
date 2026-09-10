@@ -1,7 +1,15 @@
-// Internal submissions are test data and are excluded from the live dashboard.
-export const SOURCES = ['guest', 'google', 'tripadvisor'] as const
-export type FeedbackSource = 'internal' | typeof SOURCES[number]
-export const SOURCE_LABELS = { internal: 'Internal', guest: 'Guest', google: 'Google', tripadvisor: 'Tripadvisor' }
+export const SOURCES = ['guest', 'internal', 'reviews'] as const
+export type FeedbackGroup = typeof SOURCES[number]
+export type FeedbackSource = 'guest' | 'internal' | 'google' | 'tripadvisor'
+// The two submissions the user identified as dummy data remain excluded.
+export const INTERNAL_TEST_IDS = ['54e6b32c-89d5-4aa1-b578-31d19057b17c', '7faed1d8-1289-41b8-a59e-513c387d56d0']
+export const feedbackGroup = (source: FeedbackSource): FeedbackGroup => source === 'google' || source === 'tripadvisor' ? 'reviews' : source
+export function dashboardSource(source?: string): FeedbackGroup | 'all' {
+  if (source === 'google' || source === 'tripadvisor') return 'reviews'
+  return SOURCES.includes(source as FeedbackGroup) ? source as FeedbackGroup : 'all'
+}
+const isLiveFeedback = (entry: FeedbackEntry) => ['guest','internal','google','tripadvisor'].includes(entry.source) && !(entry.source === 'internal' && INTERNAL_TEST_IDS.includes(entry.id))
+export const SOURCE_LABELS = { internal: 'Internal', guest: 'Guest', google: 'Google', tripadvisor: 'Tripadvisor', reviews: 'Reviews' }
 export const CATEGORY_LABELS: Record<string, string> = {
   cleanliness: 'Cleanliness', staff: 'Staff & service', food: 'Food & dining',
   location: 'Location', value: 'Value for money', comfort: 'Room comfort', facilities: 'Facilities',
@@ -79,26 +87,29 @@ export function googleChronologyEligible(metadata: Record<string, unknown> | nul
   return metadata?.reviewed_at_is_estimate !== true || ['hour','day','week','month'].includes(String(metadata.date_precision))
 }
 
-export function filterFeedback(entries: FeedbackEntry[], source: FeedbackSource | 'all', period: ReviewPeriod, now = new Date()) {
+export function filterFeedback(entries: FeedbackEntry[], source: FeedbackSource | FeedbackGroup | 'all', period: ReviewPeriod, now = new Date()) {
   const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
   // Full calendar months, including the current month, match chart buckets.
   if (period !== 'all') cutoff.setUTCMonth(cutoff.getUTCMonth() - Number(period.slice(0,-1)) + 1)
   const cutoffDate = cutoff.toISOString().slice(0,10)
   const today = now.toISOString().slice(0,10)
-  return entries.filter(entry => (SOURCES as readonly string[]).includes(entry.source) && (source === 'all' || source === entry.source) &&
+  return entries.filter(entry => isLiveFeedback(entry) && (source === 'all' || dashboardSource(source) === feedbackGroup(entry.source)) &&
     (period === 'all' || (entry.chronologyEligible && entry.date >= cutoffDate && entry.date <= today)))
 }
 
 function sourceSummary(entries: FeedbackEntry[], category?: string) {
   return SOURCES.map(source => {
-    const matching = entries.filter(entry => entry.source === source)
+    const matching = entries.filter(entry => feedbackGroup(entry.source) === source)
     const values = matching.map(entry => category ? entry.aspects.find(aspect => aspect.key === category)?.score : entry.score)
       .filter((score): score is number => typeof score === 'number' && Number.isFinite(score))
-    return {source, score:mean(values), count:values.length}
+    const platformScores = source === 'reviews' ? (['google','tripadvisor'] as const).map(platform => mean(matching.filter(entry => entry.source === platform)
+      .map(entry => category ? entry.aspects.find(aspect => aspect.key === category)?.score : entry.score)
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value)))).filter((value): value is number => value !== null) : []
+    return {source, score:source === 'reviews' ? mean(platformScores) : mean(values), count:values.length}
   })
 }
 export function consolidateFeedback(input: FeedbackEntry[]) {
-  const entries = input.filter(entry => (SOURCES as readonly string[]).includes(entry.source))
+  const entries = input.filter(isLiveFeedback)
   const sourceScores = sourceSummary(entries)
   const active = sourceScores.filter(source => source.score !== null)
   const score = mean(active.map(source => source.score!))

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { SOURCE_LABELS, SOURCES, type consolidateFeedback } from '@/lib/reviews/consolidated'
 
 type Summary = ReturnType<typeof consolidateFeedback>
-const colors = {internal:'#2563eb',guest:'#059669',google:'#b77900',tripadvisor:'#0d9488'}
+const colors = {internal:'#2563eb',guest:'#059669',reviews:'#0d9488'}
 export function ConsolidatedTrendChart({ trends, categories }: {trends:Summary['trends'];categories:Summary['categories']}) {
   const [category,setCategory]=useState('overall')
   const data=trends.map(point=>{

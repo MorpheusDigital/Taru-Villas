@@ -3,14 +3,14 @@ import { consolidateFeedback, filterFeedback, tripadvisorAspects, type FeedbackE
 import { reviewDateLabel, reviewListingUrl } from './display'
 
 describe('Tripadvisor feedback', () => {
-  it('balances all three live sources and excludes internal and unknown sources', () => {
+  it('balances the three source groups and excludes unknown sources', () => {
     const entry = (source: string, score: number): FeedbackEntry => ({id:source,source:source as FeedbackEntry['source'],propertyId:'p',propertyName:'P',author:'A',text:'',score,date:'2026-09-01',dateLabel:'Sep',chronologyEligible:true,aspects:[]})
     const entries=[entry('guest',0),entry('google',6),entry('tripadvisor',9),entry('internal',10),entry('unknown',10)]
     const result=consolidateFeedback(entries)
-    expect(result.score).toBe(5)
-    expect(result.count).toBe(3)
+    expect(result.score).toBeCloseTo((0+10+7.5)/3)
+    expect(result.count).toBe(4)
     expect(result.sources.map(source=>source.weight)).toEqual([1/3,1/3,1/3])
-    expect(filterFeedback(entries,'all','all')).toHaveLength(3)
+    expect(filterFeedback(entries,'all','all')).toHaveLength(4)
   })
   it('averages Rooms and Sleep Quality once, with direct scores overriding inference', () => {
     const result=tripadvisorAspects({text:'Comfy room',subratings:{Rooms:5,'Sleep Quality':3,Service:1,Value:4}},[{key:'comfort',score:8,evidence:'Comfy room',confidence:'high'}])

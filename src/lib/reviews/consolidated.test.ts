@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { categoryScoreColors, consolidateFeedback, normalizeRating, googleAspects, googleChronologyEligible, mapSurveyCategory, filterFeedback } from './consolidated'
+import { INTERNAL_TEST_IDS, dashboardSource, categoryScoreColors, consolidateFeedback, normalizeRating, googleAspects, googleChronologyEligible, mapSurveyCategory, filterFeedback } from './consolidated'
 import type { FeedbackEntry } from './consolidated'
 const entry = (id: string, source: FeedbackEntry['source'], score: number, extra: Partial<FeedbackEntry> = {}): FeedbackEntry => ({
   id, source, score, propertyId: 'p', propertyName: 'Villa', author: 'Reviewer', text: '', date: '2026-08-01', dateLabel: '1 Aug 2026', chronologyEligible: true, aspects: [], ...extra,
@@ -56,13 +56,13 @@ describe('consolidated review scores', () => {
 
 describe('dummy internal feedback exclusion', () => {
   it('excludes internal entries from counts, scores, categories and history', () => {
-    const entries = [entry('dummy','internal',2,{aspects:[{key:'survey:test',label:'Test',score:2,kind:'rated'}]}),entry('g','google',10)]
+    const entries = [entry(INTERNAL_TEST_IDS[0],'internal',2,{aspects:[{key:'survey:test',label:'Test',score:2,kind:'rated'}]}),entry('g','google',10)]
     expect(filterFeedback(entries,'all','all')).toHaveLength(1)
     const summary = consolidateFeedback(entries)
     expect(summary.count).toBe(1)
     expect(summary.score).toBe(10)
     expect(summary.categories).toEqual([])
-    expect(summary.sources.map(source=>source.source)).not.toContain('internal')
+    expect(summary.sources.find(source=>source.source==='internal')?.count).toBe(0)
   })
 })
 
@@ -70,5 +70,27 @@ describe('category score colors', () => {
   it.each([[0,'red'],[4.99,'red'],[5,'yellow'],[8,'yellow'],[8.01,'emerald'],[10,'emerald']] as const)('colors %s as %s', (score,color) => {
     expect(categoryScoreColors(score).text).toContain(color)
     expect(categoryScoreColors(score).bar).toContain(color)
+  })
+})
+
+
+describe('dashboard source groups', () => {
+  it('groups review platforms with equal platform weight inside an equally weighted source', () => {
+    const aspect = (score: number) => [{key:'staff',label:'Staff & service',score,kind:'rated' as const}]
+    const entries = [entry('guest','guest',2,{aspects:aspect(2)}), entry('internal','internal',4,{aspects:aspect(4)}),
+      ...Array.from({length:10},(_,i)=>entry(`g${i}`,'google',10,{aspects:aspect(10)})), entry('ta','tripadvisor',6,{aspects:aspect(6)})]
+    const summary=consolidateFeedback(entries)
+    expect(summary.sources.map(s=>s.source)).toEqual(['guest','internal','reviews'])
+    expect(summary.sources.map(s=>s.weight)).toEqual([1/3,1/3,1/3])
+    expect(summary.sources[2]).toMatchObject({score:8,count:11})
+    expect(summary.score).toBeCloseTo(14/3)
+    expect(summary.categories[0].score).toBeCloseTo(14/3)
+    expect(summary.trends[0].score).toBeCloseTo(14/3)
+    expect(summary.trends[0].categories.staff.score).toBeCloseTo(14/3)
+    expect(filterFeedback(entries,'reviews','all')).toHaveLength(11)
+    expect(filterFeedback(entries,'internal','all')).toHaveLength(1)
+    expect(dashboardSource('google')).toBe('reviews')
+    expect(dashboardSource('tripadvisor')).toBe('reviews')
+    expect(filterFeedback(entries,'google','all')).toHaveLength(11)
   })
 })

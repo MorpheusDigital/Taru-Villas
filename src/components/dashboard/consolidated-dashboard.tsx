@@ -4,17 +4,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { buttonVariants } from '@/components/ui/button'
 import { getConsolidatedFeedback } from '@/lib/db/queries/consolidated-reviews'
 import { getProperties } from '@/lib/db/queries/properties'
-import { categoryScoreColors, consolidateFeedback, filterFeedback, SOURCE_LABELS, SOURCES, type FeedbackSource, type ReviewPeriod } from '@/lib/reviews/consolidated'
+import { dashboardSource, feedbackGroup, categoryScoreColors, consolidateFeedback, filterFeedback, SOURCE_LABELS, SOURCES, type ReviewPeriod } from '@/lib/reviews/consolidated'
 import { REVIEW_PAGE_SIZE, reviewPagination } from '@/lib/reviews/display'
 import { ConsolidatedTrendChart } from './consolidated-trend-chart'
 
 export type DashboardFilters = { source?:string; period?:string; reviewPage?:string }
-const badgeColors = {internal:'bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-200',guest:'bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200',google:'bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-200',tripadvisor:'bg-teal-50 text-teal-900 dark:bg-teal-950 dark:text-teal-200'}
+const badgeColors = {reviews:'bg-teal-50 text-teal-900 dark:bg-teal-950 dark:text-teal-200',internal:'bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-200',guest:'bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200',google:'bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-200',tripadvisor:'bg-teal-50 text-teal-900 dark:bg-teal-950 dark:text-teal-200'}
 export async function ConsolidatedDashboard({orgId,property,filters,showPortfolioLink=true}:{
   orgId:string;property?:{id:string;name:string};filters:DashboardFilters;showPortfolioLink?:boolean
 }) {
   const [all,allProperties]=await Promise.all([getConsolidatedFeedback(orgId,property?.id),property?Promise.resolve([]):getProperties(orgId)])
-  const source:FeedbackSource|'all'=SOURCES.some(item=>item===filters.source)?filters.source as FeedbackSource:'all'
+  const source=dashboardSource(filters.source)
   const period:ReviewPeriod=['3m','6m','12m'].includes(filters.period??'')?filters.period as ReviewPeriod:'all'
   const entries=filterFeedback(all,source,period)
   const summary=consolidateFeedback(entries)
@@ -23,7 +23,7 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
   const base=property?`/dashboard/${property.id}`:'/dashboard'
   const query=`source=${source}&period=${period}`
   const snapshots=(['google','tripadvisor'] as const).map(source=>({source,count:all.filter(item=>item.source===source).length,analyzed:all.filter(item=>item.source===source&&item.analyzed).length,lastCollected:all.filter(item=>item.source===source).map(item=>item.collectedAt).filter((value):value is string=>Boolean(value)).sort().at(-1)}))
-  const excluded=all.filter(item=>(source==='all'||item.source===source)&&!item.chronologyEligible).length
+  const excluded=all.filter(item=>(source==='all'||feedbackGroup(item.source)===source)&&!item.chronologyEligible).length
   const formattedScore=(score:number|null)=>score===null?'—':score.toFixed(2)
   return <div className="space-y-6">
     <div className="flex flex-wrap items-end justify-between gap-4">
@@ -49,7 +49,7 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
         <p className="mt-2 text-4xl font-semibold tracking-tight tabular-nums">{formattedScore(summary.score)}<span className="ml-2 text-base font-normal text-muted-foreground">/ 10</span></p>
         <p className="mt-2 text-sm text-muted-foreground">{summary.count.toLocaleString()} reviews and surveys</p>
         <details className="mt-3 text-xs text-muted-foreground"><summary className="cursor-pointer hover:text-foreground">How the score is calculated</summary>
-          <p className="mt-2 max-w-prose leading-relaxed">Each available source has equal weight. Survey responses use their configured scales and category weights, then each submission counts once. Google and Tripadvisor stars are normalized from 1–5 to 0–10, so 1 star = 0 and 5 stars = 10. Missing sources have no weight. AI category estimates do not change this score.</p>
+          <p className="mt-2 max-w-prose leading-relaxed">Guest, Internal and Reviews each have equal weight when available. Within Reviews, Google and Tripadvisor have equal weight. Survey responses use their configured scales and category weights, then each submission counts once. Google and Tripadvisor stars are normalized from 1–5 to 0–10, so 1 star = 0 and 5 stars = 10. Missing sources have no weight. AI category estimates do not change this score.</p>
         </details>
       </div>
       <div className="grid gap-4 sm:grid-cols-3">
@@ -57,7 +57,7 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
           <span className={`inline-flex rounded-md px-2 py-1 text-xs font-medium ${badgeColors[item.source]}`}>{SOURCE_LABELS[item.source]}</span>
           <p className="mt-3 text-2xl font-semibold tabular-nums">{formattedScore(item.score)}<span className="ml-1 text-xs font-normal text-muted-foreground">/ 10</span></p>
           <p className="mt-1 text-xs text-muted-foreground">{item.count} scored entries · {Math.round(item.weight*100)}% weight</p>
-          {(item.source==='google'||item.source==='tripadvisor')&&item.score!==null&&<p className="mt-1 text-xs text-muted-foreground">Original rating: {(item.score/10*4+1).toFixed(2)} / 5</p>}
+          {item.source==='reviews'&&<p className="mt-1 text-xs text-muted-foreground">Google + Tripadvisor</p>}
           {item.score===null&&<p className="mt-1 text-xs text-muted-foreground">No scored feedback in this view</p>}
         </div>)}
       </div>
