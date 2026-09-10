@@ -9,7 +9,7 @@ describe('consolidated review scores', () => {
     const data = consolidateFeedback([entry('i','guest',2), ...Array.from({length:100}, (_, i) => entry(`g${i}`,'google',10))])
     expect(data.score).toBe(6)
     expect(data.sources.find(s => s.source === 'guest')?.weight).toBe(.5)
-    expect(data.sources).toHaveLength(2)
+    expect(data.sources).toHaveLength(3)
   })
   it('distinguishes a real zero from unavailable data', () => {
     expect(consolidateFeedback([]).score).toBeNull()

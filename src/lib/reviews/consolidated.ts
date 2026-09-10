@@ -1,7 +1,7 @@
 // Internal submissions are test data and are excluded from the live dashboard.
-export const SOURCES = ['guest', 'google'] as const
+export const SOURCES = ['guest', 'google', 'tripadvisor'] as const
 export type FeedbackSource = 'internal' | typeof SOURCES[number]
-export const SOURCE_LABELS = { internal: 'Internal', guest: 'Guest', google: 'Google' }
+export const SOURCE_LABELS = { internal: 'Internal', guest: 'Guest', google: 'Google', tripadvisor: 'Tripadvisor' }
 export const CATEGORY_LABELS: Record<string, string> = {
   cleanliness: 'Cleanliness', staff: 'Staff & service', food: 'Food & dining',
   location: 'Location', value: 'Value for money', comfort: 'Room comfort', facilities: 'Facilities',
@@ -55,6 +55,25 @@ export function googleAspects(metadata: Record<string, unknown> | null, inferred
   return [...byKey.values()]
 }
 
+/** Direct Tripadvisor subratings override text inference; two comfort ratings form one assessment. */
+export function tripadvisorAspects(metadata: Record<string, unknown> | null, inferred: InferredAspect[]): FeedbackAspect[] {
+  const byKey = new Map(googleAspects({text: metadata?.text}, inferred).map(aspect => [aspect.key, aspect]))
+  const ratings = metadata?.subratings
+  if (!ratings || typeof ratings !== 'object' || Array.isArray(ratings)) return [...byKey.values()]
+  const mapping: Record<string, string> = {Value:'value',Rooms:'comfort','Sleep Quality':'comfort',Location:'location',Cleanliness:'cleanliness',Service:'staff'}
+  const direct = new Map<string, {scores:number[]; evidence:string[]}>()
+  for (const [label, value] of Object.entries(ratings)) {
+    const key = mapping[label]
+    if (!key || typeof value !== 'number' || !Number.isInteger(value)) continue
+    const score = normalizeRating(value,1,5)
+    if (score === null) continue
+    const group = direct.get(key) ?? {scores:[],evidence:[]}
+    group.scores.push(score); group.evidence.push(`${label}: ${value} / 5`); direct.set(key,group)
+  }
+  for (const [key,group] of direct) byKey.set(key,{key,label:CATEGORY_LABELS[key],score:mean(group.scores)!,kind:'rated',evidence:group.evidence.join('; ')})
+  return [...byKey.values()]
+}
+
 export function googleChronologyEligible(metadata: Record<string, unknown> | null) {
   if (metadata?.date_event === 'edited') return false
   return metadata?.reviewed_at_is_estimate !== true || ['hour','day','week','month'].includes(String(metadata.date_precision))
@@ -66,7 +85,7 @@ export function filterFeedback(entries: FeedbackEntry[], source: FeedbackSource 
   if (period !== 'all') cutoff.setUTCMonth(cutoff.getUTCMonth() - Number(period.slice(0,-1)) + 1)
   const cutoffDate = cutoff.toISOString().slice(0,10)
   const today = now.toISOString().slice(0,10)
-  return entries.filter(entry => entry.source !== 'internal' && (source === 'all' || source === entry.source) &&
+  return entries.filter(entry => (SOURCES as readonly string[]).includes(entry.source) && (source === 'all' || source === entry.source) &&
     (period === 'all' || (entry.chronologyEligible && entry.date >= cutoffDate && entry.date <= today)))
 }
 
@@ -79,7 +98,7 @@ function sourceSummary(entries: FeedbackEntry[], category?: string) {
   })
 }
 export function consolidateFeedback(input: FeedbackEntry[]) {
-  const entries = input.filter(entry => entry.source !== 'internal')
+  const entries = input.filter(entry => (SOURCES as readonly string[]).includes(entry.source))
   const sourceScores = sourceSummary(entries)
   const active = sourceScores.filter(source => source.score !== null)
   const score = mean(active.map(source => source.score!))

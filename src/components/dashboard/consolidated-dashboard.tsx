@@ -9,7 +9,7 @@ import { REVIEW_PAGE_SIZE, reviewPagination } from '@/lib/reviews/display'
 import { ConsolidatedTrendChart } from './consolidated-trend-chart'
 
 export type DashboardFilters = { source?:string; period?:string; reviewPage?:string }
-const badgeColors = {internal:'bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-200',guest:'bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200',google:'bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-200'}
+const badgeColors = {internal:'bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-200',guest:'bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200',google:'bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-200',tripadvisor:'bg-teal-50 text-teal-900 dark:bg-teal-950 dark:text-teal-200'}
 export async function ConsolidatedDashboard({orgId,property,filters,showPortfolioLink=true}:{
   orgId:string;property?:{id:string;name:string};filters:DashboardFilters;showPortfolioLink?:boolean
 }) {
@@ -22,17 +22,15 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
   const page=entries.slice(pagination.offset,pagination.offset+REVIEW_PAGE_SIZE)
   const base=property?`/dashboard/${property.id}`:'/dashboard'
   const query=`source=${source}&period=${period}`
-  const lastCollected=all.map(item=>item.collectedAt).filter((value):value is string=>Boolean(value)).sort().at(-1)
+  const snapshots=(['google','tripadvisor'] as const).map(source=>({source,count:all.filter(item=>item.source===source).length,analyzed:all.filter(item=>item.source===source&&item.analyzed).length,lastCollected:all.filter(item=>item.source===source).map(item=>item.collectedAt).filter((value):value is string=>Boolean(value)).sort().at(-1)}))
   const excluded=all.filter(item=>(source==='all'||item.source===source)&&!item.chronologyEligible).length
-  const googleCount=all.filter(item=>item.source==='google').length
-  const analyzed=all.filter(item=>item.source==='google'&&item.analyzed).length
   const formattedScore=(score:number|null)=>score===null?'—':score.toFixed(2)
   return <div className="space-y-6">
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div className="space-y-1">
         {property&&showPortfolioLink&&<Link href={`/dashboard?${query}`} className="text-sm text-muted-foreground hover:underline">All properties</Link>}
         <h1 className="text-2xl font-bold tracking-tight">{property?.name??'Quality overview'}</h1>
-        <p className="text-sm text-muted-foreground">Guest feedback across surveys and Google reviews.</p>
+        <p className="text-sm text-muted-foreground">Guest feedback across surveys, Google and Tripadvisor reviews.</p>
       </div>
       <form action={base} className="flex flex-wrap items-end gap-2">
         <label className="space-y-1 text-xs text-muted-foreground"><span className="block">Source</span><select name="source" defaultValue={source} className="h-9 rounded-md border bg-background px-2 text-sm text-foreground">
@@ -51,15 +49,15 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
         <p className="mt-2 text-4xl font-semibold tracking-tight tabular-nums">{formattedScore(summary.score)}<span className="ml-2 text-base font-normal text-muted-foreground">/ 10</span></p>
         <p className="mt-2 text-sm text-muted-foreground">{summary.count.toLocaleString()} reviews and surveys</p>
         <details className="mt-3 text-xs text-muted-foreground"><summary className="cursor-pointer hover:text-foreground">How the score is calculated</summary>
-          <p className="mt-2 max-w-prose leading-relaxed">Each available source has equal weight. Survey responses use their configured scales and category weights, then each submission counts once. Google stars are normalized from 1–5 to 0–10, so 1 star = 0 and 5 stars = 10. Missing sources have no weight. AI category estimates do not change this score.</p>
+          <p className="mt-2 max-w-prose leading-relaxed">Each available source has equal weight. Survey responses use their configured scales and category weights, then each submission counts once. Google and Tripadvisor stars are normalized from 1–5 to 0–10, so 1 star = 0 and 5 stars = 10. Missing sources have no weight. AI category estimates do not change this score.</p>
         </details>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-3">
         {summary.sources.map(item=><div key={item.source} className="border-l-2 pl-4">
           <span className={`inline-flex rounded-md px-2 py-1 text-xs font-medium ${badgeColors[item.source]}`}>{SOURCE_LABELS[item.source]}</span>
           <p className="mt-3 text-2xl font-semibold tabular-nums">{formattedScore(item.score)}<span className="ml-1 text-xs font-normal text-muted-foreground">/ 10</span></p>
           <p className="mt-1 text-xs text-muted-foreground">{item.count} scored entries · {Math.round(item.weight*100)}% weight</p>
-          {item.source==='google'&&item.score!==null&&<p className="mt-1 text-xs text-muted-foreground">Original rating: {(item.score/10*4+1).toFixed(2)} / 5</p>}
+          {(item.source==='google'||item.source==='tripadvisor')&&item.score!==null&&<p className="mt-1 text-xs text-muted-foreground">Original rating: {(item.score/10*4+1).toFixed(2)} / 5</p>}
           {item.score===null&&<p className="mt-1 text-xs text-muted-foreground">No scored feedback in this view</p>}
         </div>)}
       </div>
@@ -77,10 +75,10 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
     </section>}
 
     <ConsolidatedTrendChart trends={summary.trends} categories={summary.categories} />
-    {excluded>0&&<p className="text-xs leading-relaxed text-muted-foreground">{excluded} {source==='all'?'Google ':''}reviews have only a coarse year estimate or an edited date. They contribute to all-time scores but are excluded from monthly trends and period filters.</p>}
+    {excluded>0&&<p className="text-xs leading-relaxed text-muted-foreground">{excluded} reviews have only a coarse year estimate or an edited date. They contribute to all-time scores but are excluded from monthly trends and period filters.</p>}
 
     <Card><CardHeader><CardTitle className="text-base">Category overview</CardTitle>
-      <p className="text-xs leading-relaxed text-muted-foreground">Direct survey scores and Google subratings are combined with AI-inferred sentiment from written reviews. Only mentioned categories contribute; available sources have equal weight within each category.</p>
+      <p className="text-xs leading-relaxed text-muted-foreground">Survey scores and direct subratings from Google and Tripadvisor are combined with AI-inferred sentiment from written reviews. Only mentioned categories contribute; available sources have equal weight within each category.</p>
       <p className="text-xs text-muted-foreground"><span className="text-emerald-700 dark:text-emerald-400">Green: above 8</span> · <span className="text-yellow-700 dark:text-yellow-400">Yellow: 5–8</span> · <span className="text-red-700 dark:text-red-400">Red: below 5</span></p>
     </CardHeader><CardContent>
       {summary.categories.length?<div className="grid gap-x-8 gap-y-6 sm:grid-cols-2 xl:grid-cols-3">
@@ -92,7 +90,7 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
         </div>)}
       </div>:<p className="py-8 text-center text-sm text-muted-foreground">No category evidence in the selected feedback.</p>}
       <details className="mt-5 text-xs text-muted-foreground"><summary className="cursor-pointer hover:text-foreground">About the review synthesis</summary>
-        <p className="mt-2 max-w-prose leading-relaxed">{analyzed} of {googleCount} imported Google reviews analyzed. AI-inferred scores describe sentiment, not ratings given by the reviewer: 10 exceptional praise, 8 positive, 6 mildly positive, 5 mixed or neutral, 4 mildly negative, 2 negative, 0 severe complaint. Unsupported categories are left blank. Explicit Rooms, Service, and Location subratings take priority. Supporting excerpts are available with each review below. This is a one-time analysis of the current snapshot.</p>
+        <p className="mt-2 max-w-prose leading-relaxed">{snapshots.filter(item=>item.count>0).map(item=>`${SOURCE_LABELS[item.source]}: ${item.analyzed} of ${item.count} reviews analyzed`).join(' · ')}. AI-inferred scores describe sentiment, not ratings given by the reviewer: 10 exceptional praise, 8 positive, 6 mildly positive, 5 mixed or neutral, 4 mildly negative, 2 negative, 0 severe complaint. Unsupported categories are left blank. Explicit source subratings take priority; Tripadvisor Rooms and Sleep Quality are averaged into one room comfort assessment. Supporting excerpts are available with each review below. This is a one-time analysis of the current snapshot.</p>
       </details>
     </CardContent></Card>
 
@@ -110,7 +108,7 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
         {entry.aspects.length>0&&<details className="text-xs"><summary className="cursor-pointer text-muted-foreground hover:text-foreground">Category evidence ({entry.aspects.length})</summary><ul className="mt-3 space-y-3">
           {entry.aspects.map(aspect=><li key={aspect.key}><p className="font-medium">{aspect.label}: <span className={categoryScoreColors(aspect.score).text}>{aspect.score.toFixed(1)} / 10</span> <span className="font-normal text-muted-foreground">({aspect.kind==='inferred'?'AI-inferred':'Direct score'})</span></p>{aspect.evidence&&<blockquote className="mt-1 max-w-prose border-l-2 pl-3 text-muted-foreground">{aspect.evidence}</blockquote>}</li>)}
         </ul></details>}
-        {entry.sourceUrl&&<a href={entry.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:underline">View property on Google Maps<ArrowUpRight className="size-3" /></a>}
+        {entry.sourceUrl&&<a href={entry.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:underline">{entry.source==='tripadvisor'?'View review on Tripadvisor':'View property on Google Maps'}<ArrowUpRight className="size-3" /></a>}
       </CardContent></Card>)}
       {!entries.length&&<p className="rounded-lg border py-12 text-center text-sm text-muted-foreground">No feedback matches these filters. Try all sources or a longer period.</p>}
       {pagination.pages>1&&<nav aria-label="Feedback pages" className="flex items-center justify-between gap-2">
@@ -119,6 +117,6 @@ export async function ConsolidatedDashboard({orgId,property,filters,showPortfoli
         {pagination.page<pagination.pages?<Link href={`${base}?${query}&reviewPage=${pagination.page+1}`} className={buttonVariants({variant:'outline'})}>Next</Link>:<span />}
       </nav>}
     </section>
-    {lastCollected&&<p className="text-xs text-muted-foreground">Google snapshot last imported {new Date(lastCollected).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})}. Review text may include Google translations.</p>}
+    {snapshots.filter(item=>item.lastCollected).map(item=><p key={item.source} className="text-xs text-muted-foreground">{SOURCE_LABELS[item.source]} snapshot last imported {new Date(item.lastCollected!).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})}. Review text may include source translations.</p>)}
   </div>
 }

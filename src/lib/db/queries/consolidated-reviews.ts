@@ -1,14 +1,14 @@
-import { and, eq, notLike } from 'drizzle-orm'
+import { and, eq, inArray, notLike } from 'drizzle-orm'
 import { db } from '../index'
 import { otaReviews, otaReviewSources, otaReviewAnalyses, properties, surveySubmissions,
   surveyResponses, surveyTemplates, surveyQuestions, surveySubcategories, surveyCategories } from '../schema'
-import { type FeedbackEntry, type FeedbackAspect, googleAspects, googleChronologyEligible, mapSurveyCategory, normalizeRating } from '../../reviews/consolidated'
+import { type FeedbackEntry, type FeedbackAspect, googleAspects, tripadvisorAspects, googleChronologyEligible, mapSurveyCategory, normalizeRating } from '../../reviews/consolidated'
 import { reviewDateLabel, reviewListingUrl } from '../../reviews/display'
 
 export async function getConsolidatedFeedback(orgId: string, propertyId?: string): Promise<FeedbackEntry[]> {
   const scope = and(eq(properties.orgId, orgId), eq(properties.isActive,true), propertyId ? eq(properties.id,propertyId) : undefined)
-  const [google, surveyRows] = await Promise.all([
-    db.select({id:otaReviews.id, propertyId:properties.id, propertyName:properties.name,
+  const [online, surveyRows] = await Promise.all([
+    db.select({source:otaReviewSources.source,id:otaReviews.id, propertyId:properties.id, propertyName:properties.name,
       author:otaReviews.authorName, text:otaReviews.text, rating:otaReviews.rating,
       reviewedAt:otaReviews.reviewedAt, fetchedAt:otaReviews.fetchedAt, metadata:otaReviews.rawPayload,
       aspects:otaReviewAnalyses.aspects, analysisId:otaReviewAnalyses.reviewId,
@@ -16,7 +16,7 @@ export async function getConsolidatedFeedback(orgId: string, propertyId?: string
       .innerJoin(properties,eq(properties.id,otaReviews.propertyId))
       .innerJoin(otaReviewSources,and(eq(otaReviewSources.id,otaReviews.sourceId),eq(otaReviewSources.propertyId,properties.id)))
       .leftJoin(otaReviewAnalyses,and(eq(otaReviewAnalyses.reviewId,otaReviews.id),eq(otaReviewAnalyses.rubricVersion,'hospitality-v1')))
-      .where(and(scope,eq(otaReviewSources.source,'google'),notLike(otaReviews.externalReviewId,'manual-%'))),
+      .where(and(scope,inArray(otaReviewSources.source,['google','tripadvisor']),notLike(otaReviews.externalReviewId,'manual-%'))),
     db.select({id:surveySubmissions.id, propertyId:properties.id, propertyName:properties.name,
       source:surveyTemplates.surveyType, author:surveySubmissions.guestName,
       date:surveySubmissions.visitDate, notes:surveySubmissions.notes,
@@ -32,12 +32,12 @@ export async function getConsolidatedFeedback(orgId: string, propertyId?: string
       .leftJoin(surveyCategories,and(eq(surveyCategories.id,surveySubcategories.categoryId),eq(surveyCategories.templateId,surveySubmissions.templateId)))
       .where(and(scope,eq(surveySubmissions.status,'submitted'),eq(surveyTemplates.surveyType,'guest'))),
   ])
-  const entries: FeedbackEntry[] = google.map(row => ({
-    id:row.id,propertyId:row.propertyId,propertyName:row.propertyName,source:'google',author:row.author || 'Google reviewer',
+  const entries: FeedbackEntry[] = online.map(row => ({
+    id:row.id,propertyId:row.propertyId,propertyName:row.propertyName,source:row.source as 'google' | 'tripadvisor',author:row.author || `${row.source === 'tripadvisor' ? 'Tripadvisor' : 'Google'} reviewer`,
     text:row.text || '',score:normalizeRating(row.rating,1,5),originalRating:row.rating,
     date:row.reviewedAt.toISOString().slice(0,10),dateLabel:reviewDateLabel(row.reviewedAt,row.metadata),
-    chronologyEligible:googleChronologyEligible(row.metadata),aspects:googleAspects({...row.metadata,text:row.text || ''}, row.aspects ?? []),
-    sourceUrl:reviewListingUrl(row.metadata),collectedAt:row.fetchedAt.toISOString(),analyzed:row.analysisId !== null,
+    chronologyEligible:googleChronologyEligible(row.metadata),aspects:(row.source === 'tripadvisor' ? tripadvisorAspects : googleAspects)({...row.metadata,text:row.text || ''}, row.aspects ?? []),
+    sourceUrl:reviewListingUrl({...row.metadata,source:row.source}),collectedAt:row.fetchedAt.toISOString(),analyzed:row.analysisId !== null,
   }))
   const groups = new Map<string, typeof surveyRows>()
   for (const row of surveyRows) {const group=groups.get(row.id)??[];group.push(row);groups.set(row.id,group)}

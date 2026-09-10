@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { SOURCE_LABELS, SOURCES, type consolidateFeedback } from '@/lib/reviews/consolidated'
 
 type Summary = ReturnType<typeof consolidateFeedback>
-const colors = {internal:'#2563eb',guest:'#059669',google:'#b77900'}
+const colors = {internal:'#2563eb',guest:'#059669',google:'#b77900',tripadvisor:'#0d9488'}
 export function ConsolidatedTrendChart({ trends, categories }: {trends:Summary['trends'];categories:Summary['categories']}) {
   const [category,setCategory]=useState('overall')
   const data=trends.map(point=>{
@@ -51,7 +51,7 @@ export function ConsolidatedTrendChart({ trends, categories }: {trends:Summary['
           <Line type="linear" dataKey="score" name="Combined" stroke="var(--foreground)" strokeWidth={2.5} dot={{r:3}} connectNulls={false} />
         </LineChart></ResponsiveContainer>
       </div>:<p className="py-16 text-center text-sm text-muted-foreground">No dated evidence for this measure in the selected period.</p>}
-      <p className="mt-3 text-xs leading-relaxed text-muted-foreground">Monthly averages. Google months are approximate. Gaps mean no data; the combined score uses the sources available in each month.{category!=='overall'?' Category scores include labeled AI-inferred sentiment.':''}</p>
+      <p className="mt-3 text-xs leading-relaxed text-muted-foreground">Monthly averages. Google and Tripadvisor dates retain the precision provided by each source; some months are approximate. Gaps mean no data; the combined score uses the sources available in each month.{category!=='overall'?' Category scores include labeled AI-inferred sentiment.':''}</p>
     </CardContent>
   </Card>
 }
