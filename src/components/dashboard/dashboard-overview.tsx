@@ -1,5 +1,7 @@
 'use client'
 
+import { forwardFillScores } from '@/lib/reviews/trend-display'
+
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
@@ -130,7 +132,7 @@ function PropertyCard({
   onClick: () => void
 }) {
   const scoreColor = getScoreColor(property.score)
-  const sparklineData = property.sparkline.map((v, i) => ({ i, v }))
+  const sparklineData = forwardFillScores(property.sparkline.map((v, i) => ({ i, v })), ['v'])
 
   return (
     <Card

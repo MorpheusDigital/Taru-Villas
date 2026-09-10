@@ -11,6 +11,7 @@ import {
   Legend,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { forwardFillScores } from '@/lib/reviews/trend-display'
 import { useIsMobile } from '@/hooks/use-mobile'
 
 interface LineConfig {
@@ -41,7 +42,7 @@ function CustomTooltip({
   label,
 }: {
   active?: boolean
-  payload?: Array<{ name: string; value: number; color: string }>
+  payload?: Array<{ name: string; value: number; color: string; dataKey?: string; payload?: {carriedFrom?: Record<string,string>} }>
   label?: string
 }) {
   if (!active || !payload || payload.length === 0) return null
@@ -60,7 +61,7 @@ function CustomTooltip({
             />
             <span className="text-muted-foreground">{entry.name}:</span>
             <span className="font-semibold tabular-nums">
-              {entry.value.toFixed(1)}
+              {entry.value.toFixed(1)}{entry.dataKey && entry.payload?.carriedFrom?.[entry.dataKey] ? ` · Carried forward from ${entry.payload.carriedFrom[entry.dataKey]}` : ''}
             </span>
           </div>
         ))}
@@ -109,7 +110,7 @@ export function TrendChart({
       <CardContent>
         <ResponsiveContainer width="100%" height={chartHeight}>
           <LineChart
-            data={data}
+            data={forwardFillScores(data, lines.map(line=>line.key))}
             margin={{ top: 5, right: 10, left: -10, bottom: 5 }}
           >
             <CartesianGrid

@@ -1,5 +1,6 @@
 'use client'
 
+import { forwardFillScores } from '@/lib/reviews/trend-display'
 import { useState } from 'react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -9,14 +10,14 @@ type Summary = ReturnType<typeof consolidateFeedback>
 const colors = {internal:'#2563eb',guest:'#059669',reviews:'#0d9488'}
 export function ConsolidatedTrendChart({ trends, categories }: {trends:Summary['trends'];categories:Summary['categories']}) {
   const [category,setCategory]=useState('overall')
-  const data=trends.map(point=>{
+  const data=forwardFillScores(trends.map(point=>{
     const selected=category==='overall'?point:point.categories[category]
     return {month:point.month,label:new Date(`${point.month}-01T00:00:00Z`).toLocaleDateString('en-GB',{month:'short',year:'2-digit',timeZone:'UTC'}),
       score:selected?.score??null,
       ...Object.fromEntries(SOURCES.map(source=>[source,selected?.sources.find(s=>s.source===source)?.score??null])),
       counts:Object.fromEntries(SOURCES.map(source=>[source,selected?.sources.find(s=>s.source===source)?.count??0])),
     }
-  })
+  }), ['score', ...SOURCES])
   return <Card>
     <CardHeader className="flex flex-wrap items-center justify-between gap-3 sm:flex-row">
       <CardTitle className="text-base">Score trends over time</CardTitle>
@@ -39,10 +40,10 @@ export function ConsolidatedTrendChart({ trends, categories }: {trends:Summary['
             if(!point)return null
             return <div className="rounded-lg border bg-background p-3 text-xs shadow-md">
               <p className="mb-2 font-medium">{label}</p>
-              <p className="font-semibold">Combined: {point.score?.toFixed(2)??'No data'} / 10</p>
+              <p className="font-semibold">Combined: {point.score?.toFixed(2)??'No data'} / 10{point.carriedFrom.score ? ` · Carried forward from ${point.carriedFrom.score}` : ''}</p>
               {SOURCES.map(source=>{
                 const score=point[source as keyof typeof point]
-                return <p key={source} className="mt-1">{SOURCE_LABELS[source]}: {typeof score==='number'?score.toFixed(2):'No data'} ({point.counts[source]} {category==='overall'?'entries':'mentions'})</p>
+                return <p key={source} className="mt-1">{SOURCE_LABELS[source]}: {typeof score==='number'?score.toFixed(2):'No data'} ({point.counts[source]} {category==='overall'?'entries':'mentions'}){point.carriedFrom[source] ? ` · Carried forward from ${point.carriedFrom[source]}` : ''}</p>
               })}
             </div>
           }} />
@@ -51,7 +52,7 @@ export function ConsolidatedTrendChart({ trends, categories }: {trends:Summary['
           <Line type="linear" dataKey="score" name="Combined" stroke="var(--foreground)" strokeWidth={2.5} dot={{r:3}} connectNulls={false} />
         </LineChart></ResponsiveContainer>
       </div>:<p className="py-16 text-center text-sm text-muted-foreground">No dated evidence for this measure in the selected period.</p>}
-      <p className="mt-3 text-xs leading-relaxed text-muted-foreground">Monthly averages. Google and Tripadvisor dates retain the precision provided by each source; some months are approximate. Gaps mean no data; the combined score uses the sources available in each month.{category!=='overall'?' Category scores include labeled AI-inferred sentiment.':''}</p>
+      <p className="mt-3 text-xs leading-relaxed text-muted-foreground">Monthly averages. Google and Tripadvisor dates retain the precision provided by each source; some months are approximate. Periods without a score carry forward the last available score for each line. Carried-forward values are labeled in the tooltip and do not add feedback or change averages. Lines start at the first available score.{category!=='overall'?' Category scores include labeled AI-inferred sentiment.':''}</p>
     </CardContent>
   </Card>
 }
